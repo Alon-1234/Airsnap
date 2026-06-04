@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "AirSnap Backend (Python)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/airsnap-server/server.py",
+      "cwd": "${workspaceFolder}/airsnap-server",
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/airsnap-server/.env",
+      "justMyCode": true
+    },
+    {
+      "name": "AirSnap App (Expo LAN)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npx expo start --lan",
+      "cwd": "${workspaceFolder}"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "AirSnap: App + Backend",
+      "configurations": [
+        "AirSnap Backend (Python)",
+        "AirSnap App (Expo LAN)"
+      ]
+    }
+  ]
+}

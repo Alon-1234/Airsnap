@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -sS -o /dev/null -w \"HTTP %{http_code}\\\\n\" -X POST http://localhost:4000/orders -H 'content-type: application/json' -d '{\"targetLat\":31.83,\"targetLng\":35.13,\"package\":{\"durationSec\":30}}')",
+      "Bash(curl -sS -o /dev/null -w \"HTTP %{http_code}\\\\n\" -X POST http://localhost:4000/hives -H 'content-type: application/json' -d '{\"name\":\"x\",\"latitude\":31.83,\"longitude\":35.13}')",
+      "Bash(curl -sS -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:4000/hives)",
+      "Bash(curl -sS -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:4000/)",
+      "Bash(ipconfig)",
+      "Bash(curl -sS -o /dev/null -w \"HTTP %{http_code}\\\\n\" -X POST http://localhost:4000/orders -H 'content-type: application/json' -d '{}')",
+      "Bash(curl -sS http://localhost:4000/spatial/validate-geofence -X POST -H 'content-type: application/json' -d '{\"user\":{\"latitude\":31.83,\"longitude\":35.13}}')",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //F //PID 36648)",
+      "Bash(git --version)"
+    ]
+  }
+}

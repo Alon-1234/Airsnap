@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "229971846721",
+    "project_id": "airsnap-7844f",
+    "storage_bucket": "airsnap-7844f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:229971846721:android:e263146c5db7248dbd08c0",
+        "android_client_info": {
+          "package_name": "com.airsnap.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "229971846721-v6o8tpjpi1s0snua4r595icqaoncgesk.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.airsnap.app",
+            "certificate_hash": "167db4afd7e8941a2cdf1dc0a396f98d029fb884"
+          }
+        },
+        {
+          "client_id": "229971846721-8lt6d8fs707tbs1jacamc91utome5m59.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAUQvPIkGrCOTLZMgodjcwWHnPcIWhgfSE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "229971846721-8lt6d8fs707tbs1jacamc91utome5m59.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "229971846721-3eo7m63vpf17a5r1mr6s14f4l90hvpmj.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.airsnap.app"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

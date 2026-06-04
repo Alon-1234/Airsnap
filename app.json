@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "AirSnap",
+    "slug": "airsnap",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F0F1A"
+    },
+    "scheme": "airsnap",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.airsnap.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "AirSnap needs your location to dispatch a drone to you."
+      }
+    },
+    "android": {
+      "package": "com.airsnap.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0F0F1A",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": ["ACCESS_FINE_LOCATION"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

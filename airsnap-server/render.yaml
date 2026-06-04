@@ -1,0 +1,21 @@
+# Render Blueprint — auto-detected by Render.com if you point it
+# at this folder. If you set it up manually in the dashboard instead,
+# use these same values.
+services:
+  - type: web
+    name: airsnap-server
+    runtime: node
+    rootDir: airsnap-server
+    plan: free
+    region: oregon
+    branch: main
+    buildCommand: npm install
+    startCommand: node index.js
+    healthCheckPath: /health
+    envVars:
+      - key: ADMIN_EMAILS
+        value: akonk13579@gmail.com
+      - key: FIREBASE_PROJECT_ID
+        value: airsnap-7844f
+      - key: NODE_VERSION
+        value: 20
