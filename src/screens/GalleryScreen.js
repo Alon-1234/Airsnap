@@ -30,11 +30,14 @@ import {
   Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { ScreenWrapper } from '../components/common';
 import { useTheme } from '../context';
 import { Typography, Spacing } from '../theme';
-import { MOCK_GALLERY } from '../constants';
+
+const GALLERY_KEY = '@airsnap_gallery';
 
 const { width } = Dimensions.get('window');
 const COLUMN_GAP = 10;
@@ -44,21 +47,29 @@ export default function GalleryScreen() {
   // ── State ──────────────────────────────────────────────
   const [filter, setFilter] = useState('all');          // all | photo | video
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedImage, setSelectedImage] = useState(null); // full-screen URI
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [items, setItems] = useState([]);
   const { colors } = useTheme();
   const styles = dynamicStyles(colors);
 
-  // ── Filtered data ─────────────────────────────────────
-  const data =
-    filter === 'all'
-      ? MOCK_GALLERY
-      : MOCK_GALLERY.filter((item) => item.type === filter);
-
-  // ── Pull-to-refresh simulation ─────────────────────────
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1200);
+  // ── Load from AsyncStorage (re-runs on tab focus) ──────
+  const reload = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(GALLERY_KEY);
+      setItems(raw ? JSON.parse(raw) : []);
+    } catch (_) { setItems([]); }
   }, []);
+
+  useFocusEffect(useCallback(() => { reload(); }, [reload]));
+
+  const data =
+    filter === 'all' ? items : items.filter((item) => item.type === filter);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await reload();
+    setRefreshing(false);
+  }, [reload]);
 
   // ── Render a single gallery tile ──────────────────────
   const renderTile = ({ item, index }) => {

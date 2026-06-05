@@ -4,14 +4,20 @@ import { API_BASE_URL } from '../config/serverConfig';
 /**
  * Backend-synced geofence validation hook.
  * Debounces coordinate changes and keeps request race-safe.
+ *
+ * Pass a changing `triggerKey` (e.g., the number of hives) to force a
+ * re-validation when something other than coords changed — like an
+ * admin placing a new hive.
  */
-export function useGeofence(coords) {
+export function useGeofence(coords, triggerKey = 0) {
   const [state, setState] = useState({
     loading: false,
     inBounds: false,
+    available: false,
     distanceMeters: null,
     radiusMeters: null,
     hive: null,
+    secondsUntilNextAvailable: null,
     error: null,
   });
 
@@ -62,9 +68,11 @@ export function useGeofence(coords) {
         setState({
           loading: false,
           inBounds: Boolean(payload.inBounds),
+          available: Boolean(payload.available),
           distanceMeters: payload.distanceMeters,
           radiusMeters: payload.radiusMeters,
           hive: payload.hive,
+          secondsUntilNextAvailable: payload.secondsUntilNextAvailable ?? null,
           error: null,
         });
       } catch (error) {
@@ -79,12 +87,12 @@ export function useGeofence(coords) {
     }, 550);
 
     return () => clearTimeout(timer);
-  }, [coords?.latitude, coords?.longitude]);
+  }, [coords?.latitude, coords?.longitude, triggerKey]);
 
   return useMemo(
     () => ({
       ...state,
-      isOrderAllowed: state.inBounds && !state.loading,
+      isOrderAllowed: state.inBounds && state.available && !state.loading,
     }),
     [state]
   );

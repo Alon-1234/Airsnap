@@ -69,6 +69,7 @@ export default function LiveSessionScreen({ navigation, route }) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const sessionStartedRef = useRef(false);
   const navigatedRef = useRef(false);
+  const deliveredMediaRef = useRef(null);
 
   // ── Connect to sim, start the session, subscribe ────────
   useEffect(() => {
@@ -94,11 +95,16 @@ export default function LiveSessionScreen({ navigation, route }) {
       if (!mounted || id !== orderId) return;
       setElapsedSec(e);
     });
+    const offDelivered = sim.onOrderDelivered(({ orderId: id, media }) => {
+      if (!mounted || id !== orderId) return;
+      deliveredMediaRef.current = media || null;
+    });
 
     return () => {
       mounted = false;
       offState();
       offProgress();
+      offDelivered();
     };
   }, [orderId]);
 
@@ -134,11 +140,22 @@ export default function LiveSessionScreen({ navigation, route }) {
       const t = setTimeout(() => {
         navigation.navigate('ContentDelivery', {
           orderId, package: pkg, siteName, hive,
+          media: deliveredMediaRef.current,
         });
       }, 1200);
       return () => clearTimeout(t);
     }
   }, [droneStatus, navigation, orderId, pkg, siteName, hive]);
+
+  // ── End-session-early — tell the server, then navigate ──
+  const handleEndEarly = () => {
+    const sim = getSimClient();
+    sim.endSession(orderId).catch(() => {});
+    navigation.navigate('ContentDelivery', {
+      orderId, package: pkg, siteName, hive,
+      media: deliveredMediaRef.current,
+    });
+  };
 
   const fmt = (secs) =>
     `${Math.floor(secs / 60)}:${String(Math.round(secs) % 60).padStart(2, '0')}`;
@@ -231,14 +248,7 @@ export default function LiveSessionScreen({ navigation, route }) {
         </View>
 
         {isRecording && (
-          <TouchableOpacity
-            style={styles.endBtn}
-            onPress={() =>
-              navigation.navigate('ContentDelivery', {
-                orderId, package: pkg, siteName, hive,
-              })
-            }
-          >
+          <TouchableOpacity style={styles.endBtn} onPress={handleEndEarly}>
             <Ionicons name="stop-circle" size={20} color={colors.error} />
             <Text style={[Typography.bodySmall, { color: colors.textSecondary }, styles.endText]}>
               End Session Early

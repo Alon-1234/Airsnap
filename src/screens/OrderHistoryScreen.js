@@ -7,33 +7,101 @@
  *    • Delivered status badge
  *    • Thumbnail previews of the captured content
  *
- *  Accessed from the Profile → "Order & Invoice History" link.
- *  Data comes from MOCK_ORDER_HISTORY in constants.
+ *  Data flow:
+ *    1. Reads cached orders from AsyncStorage immediately
+ *    2. In parallel, asks the server for fresh orders
+ *    3. Reloads on tab focus + pull-to-refresh
+ *
+ *  AsyncStorage cache is populated by ContentDeliveryScreen so
+ *  history works offline (and surfaces even when the Render
+ *  free tier is asleep for the first 20s).
  * ============================================================
  */
 
-import React from 'react';
-import { View, Text, Image, FlatList, StyleSheet } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  Image,
+  FlatList,
+  StyleSheet,
+  RefreshControl,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { ScreenWrapper, Card, StatusBadge } from '../components/common';
 import { useTheme } from '../context';
 import { Typography, Spacing } from '../theme';
-import { MOCK_ORDER_HISTORY, DRONE_STATUS } from '../constants';
+import { simApi } from '../services/SimClient';
+
+const ORDERS_KEY = '@airsnap_orders';
+
+function normalizeServerOrder(o) {
+  // Server shape -> view shape used by this screen.
+  return {
+    id: o.id,
+    date: o.deliveredAt
+      ? new Date(o.deliveredAt).toISOString().slice(0, 10)
+      : new Date(o.createdAt).toISOString().slice(0, 10),
+    site: o.siteName || o.hive?.name || 'Live Location',
+    package: o.package?.name || 'Package',
+    price: o.package?.price ?? 0,
+    status: o.deliveredAt ? 'delivered' : 'processing',
+    thumbnails: o.media?.photos?.slice(0, 3) || [],
+    media: o.media || null,
+    hiveName: o.hive?.name || null,
+  };
+}
 
 export default function OrderHistoryScreen({ navigation }) {
   const { colors } = useTheme();
+  const [orders, setOrders] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    // Read cache first — instant render.
+    let cached = [];
+    try {
+      const raw = await AsyncStorage.getItem(ORDERS_KEY);
+      cached = raw ? JSON.parse(raw) : [];
+    } catch (_) {}
+    setOrders(cached);
+
+    // Fetch fresh from server, merge, persist.
+    try {
+      const res = await simApi.listOrders();
+      const fresh = (res.orders || []).map(normalizeServerOrder);
+      const byId = new Map();
+      // Server wins for fields it knows about; local cache fills the gaps.
+      for (const o of cached) byId.set(o.id, o);
+      for (const o of fresh) byId.set(o.id, { ...byId.get(o.id), ...o });
+      const merged = Array.from(byId.values())
+        .sort((a, b) => (b.date < a.date ? -1 : 1));
+      setOrders(merged);
+      await AsyncStorage.setItem(ORDERS_KEY, JSON.stringify(merged));
+    } catch (_) {
+      // Offline — cache stays in view.
+    }
+  }, []);
+
+  useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
 
   // ── Render a single order card ─────────────────────────
   const renderOrder = ({ item }) => (
     <Card style={styles.orderCard}>
-      {/* Header row: order ID + status */}
       <View style={styles.headerRow}>
         <Text style={[Typography.bodySemibold, { color: colors.textPrimary }]}>{item.id}</Text>
         <StatusBadge status={item.status} />
       </View>
 
-      {/* Details */}
       <View style={styles.detailRow}>
         <Ionicons name="calendar" size={16} color={colors.textMuted} />
         <Text style={[Typography.bodySmall, styles.detailText, { color: colors.textSecondary }]}>{item.date}</Text>
@@ -49,8 +117,7 @@ export default function OrderHistoryScreen({ navigation }) {
         </Text>
       </View>
 
-      {/* Thumbnail previews */}
-      {item.thumbnails.length > 0 && (
+      {item.thumbnails?.length > 0 && (
         <View style={styles.thumbRow}>
           {item.thumbnails.map((uri, idx) => (
             <Image key={idx} source={{ uri }} style={styles.thumb} />
@@ -60,7 +127,6 @@ export default function OrderHistoryScreen({ navigation }) {
     </Card>
   );
 
-  // ── Render ─────────────────────────────────────────────
   return (
     <ScreenWrapper
       title="Order History"
@@ -68,16 +134,26 @@ export default function OrderHistoryScreen({ navigation }) {
       scroll={false}
     >
       <FlatList
-        data={MOCK_ORDER_HISTORY}
+        data={orders}
         keyExtractor={(item) => item.id}
         renderItem={renderOrder}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+          />
+        }
         ListEmptyComponent={
           <View style={styles.empty}>
             <Ionicons name="receipt-outline" size={56} color={colors.textMuted} />
             <Text style={[Typography.h3, { marginTop: Spacing.md, color: colors.textPrimary }]}>
               No orders yet
+            </Text>
+            <Text style={[Typography.bodySmall, { color: colors.textSecondary, textAlign: 'center', marginTop: 4 }]}>
+              Order a drone session from the Home tab to see it here.
             </Text>
           </View>
         }
@@ -91,10 +167,9 @@ const styles = StyleSheet.create({
   list: {
     paddingHorizontal: Spacing.screenPadding,
     paddingBottom: Spacing.xxl,
+    flexGrow: 1,
   },
-  orderCard: {
-    marginBottom: Spacing.md,
-  },
+  orderCard: { marginBottom: Spacing.md },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -106,9 +181,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 4,
   },
-  detailText: {
-    marginLeft: 8,
-  },
+  detailText: { marginLeft: 8 },
   thumbRow: {
     flexDirection: 'row',
     marginTop: Spacing.md,
@@ -123,5 +196,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingTop: 100,
+    paddingHorizontal: Spacing.xl,
   },
 });

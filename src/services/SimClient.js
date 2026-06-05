@@ -69,6 +69,7 @@ export const simApi = {
   deleteHive: (id) => request('DELETE', `/hives/${encodeURIComponent(id)}`, null, { auth: true }),
   createOrder: (body) => request('POST', '/orders', body, { auth: true }),
   getOrder: (id) => request('GET', `/orders/${encodeURIComponent(id)}`, null, { auth: true }),
+  listOrders: () => request('GET', '/orders', null, { auth: true }),
   validateGeofence: (coords) => request('POST', '/spatial/validate-geofence', { user: coords }),
 };
 
@@ -127,9 +128,14 @@ function createClient() {
       const s = await ensureConnected();
       s.emit('session:start', { orderId });
     },
+    async endSession(orderId) {
+      const s = await ensureConnected();
+      s.emit('session:end', { orderId });
+    },
     onDroneState(cb)        { return _on('drone:state', cb); },
     onOrderStatus(cb)       { return _on('order:status', cb); },
     onSessionProgress(cb)   { return _on('session:progress', cb); },
+    onOrderDelivered(cb)    { return _on('order:delivered', cb); },
     onHiveCreated(cb)       { return _on('hive:created', cb); },
     onHiveUpdated(cb)       { return _on('hive:updated', cb); },
     onHiveDeleted(cb)       { return _on('hive:deleted', cb); },

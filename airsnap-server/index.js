@@ -6,19 +6,22 @@
  *
  *  Routes
  *    GET  /health                       — liveness check
- *    GET  /hives                        — list all hives
- *    POST /hives                        — admin only, create
+ *    GET  /hives                        — list all hives + fleet
+ *    POST /hives                        — admin only, create / merge
  *    DELETE /hives/:id                  — admin only, delete
- *    POST /orders                       — authed, create + start sim
- *    GET  /orders/:id                   — authed, fetch state
+ *    POST /orders                       — authed, reserve drone + sim
+ *    GET  /orders                       — authed, list this user's orders
+ *    GET  /orders/:id                   — authed, fetch one order
  *    POST /spatial/validate-geofence    — open, distance to nearest hive
  *
- *  Socket events
- *    client -> server : order:join { orderId }
- *                       user:location { orderId, latitude, longitude }
- *                       session:start { orderId }
- *                       hello:viewer                  (web viz only)
- *    server -> client : drone:state, order:status, session:progress
+ *  Socket events (server -> client)
+ *    drone:state, order:status, session:progress,
+ *    hive:created, hive:updated, hive:deleted, hives:snapshot,
+ *    order:delivered, user:location
+ *
+ *  Socket events (client -> server)
+ *    order:join, user:location, session:start, session:end,
+ *    hello:viewer
  * ============================================================
  */
 
@@ -33,7 +36,7 @@ const { requireAuth, requireAdmin, initFirebase } = require('./auth');
 const hiveStore = require('./hiveStore');
 const orderStore = require('./orderStore');
 const { Drone, STATUS } = require('./droneSim');
-const { haversineDistanceMeters } = require('./geofence');
+const { pickMedia } = require('./samples');
 
 const PORT = Number(process.env.PORT) || 4000;
 const DELIVERY_ZONE_RADIUS_METERS = 500;
@@ -45,11 +48,16 @@ app.use(express.json({ limit: '64kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Per-order Drone instance.
-const drones = new Map(); // orderId -> Drone
+const drones = new Map();
 
 // ── HTTP routes ──────────────────────────────────────────
 app.get('/health', (req, res) => {
-  res.json({ ok: true, uptime: process.uptime(), hives: hiveStore.listHives().length, drones: drones.size });
+  res.json({
+    ok: true,
+    uptime: process.uptime(),
+    hives: hiveStore.listHives().length,
+    drones: drones.size,
+  });
 });
 
 app.get('/hives', (req, res) => {
@@ -63,8 +71,6 @@ app.post('/hives', requireAdmin, (req, res) => {
   }
   try {
     const { hive, merged } = hiveStore.createHive({ name, latitude, longitude, createdBy: req.user.email });
-    // For a brand-new hive, broadcast hive:created. For a merge (capacity++),
-    // broadcast hive:updated so existing clients re-render the same marker.
     io.emit(merged ? 'hive:updated' : 'hive:created', hive);
     res.status(201).json({ hive, merged });
   } catch (e) {
@@ -88,6 +94,7 @@ app.post('/spatial/validate-geofence', (req, res) => {
   if (!nearest) {
     return res.status(404).json({
       inBounds: false,
+      available: false,
       distanceMeters: null,
       radiusMeters: DELIVERY_ZONE_RADIUS_METERS,
       hive: null,
@@ -95,15 +102,18 @@ app.post('/spatial/validate-geofence', (req, res) => {
     });
   }
   const inRange = nearest.distanceMeters <= DELIVERY_ZONE_RADIUS_METERS;
-  const available = inRange && hiveStore.isAvailable(nearest.hive);
+  const available = inRange && (nearest.hive.available > 0);
   res.json({
     inBounds: inRange,
     available,
     distanceMeters: nearest.distanceMeters,
     radiusMeters: DELIVERY_ZONE_RADIUS_METERS,
     hive: nearest.hive,
+    secondsUntilNextAvailable: inRange && !available
+      ? hiveStore.secondsUntilNextAvailable(nearest.hive.id) ?? null
+      : null,
     message: inRange && !available
-      ? `All ${nearest.hive.capacity} drone(s) at "${nearest.hive.name}" are currently in use.`
+      ? `All drones at "${nearest.hive.name}" are recharging.`
       : undefined,
   });
 });
@@ -117,18 +127,19 @@ app.post('/orders', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'package.durationSec required' });
   }
 
-  // Pick the nearest hive with an available drone.
   const target = { latitude: targetLat, longitude: targetLng };
   const candidate = hiveStore.nearestAvailableHive(target);
   if (!candidate) {
-    // Differentiate "no hives at all" vs "all hives at capacity".
     const closest = hiveStore.nearestHive(target);
     if (!closest) {
       return res.status(409).json({ error: 'No hives configured — ask an admin to place one first.' });
     }
     if (closest.distanceMeters <= DELIVERY_ZONE_RADIUS_METERS) {
+      const seconds = hiveStore.secondsUntilNextAvailable(closest.hive.id);
       return res.status(409).json({
-        error: `All ${closest.hive.capacity} drone(s) at "${closest.hive.name}" are currently in use. Try again in a moment.`,
+        error: seconds
+          ? `All drones at "${closest.hive.name}" are recharging — back in ~${seconds}s.`
+          : `All drones at "${closest.hive.name}" are currently in use.`,
       });
     }
     return res.status(409).json({
@@ -143,28 +154,33 @@ app.post('/orders', requireAuth, (req, res) => {
     });
   }
 
-  // Reserve a drone slot on this hive.
-  const reserved = hiveStore.reserveDrone(candidate.hive.id);
-  if (!reserved) {
-    // Race: hive just filled up between candidate-pick and reserve.
+  const reservation = hiveStore.reserveDrone(candidate.hive.id);
+  if (!reservation) {
     return res.status(409).json({ error: 'That hive just filled up — try again.' });
   }
-  io.emit('hive:updated', reserved);
+  io.emit('hive:updated', reservation.hive);
 
   const order = orderStore.createOrder({
     userId: req.user.uid,
     userEmail: req.user.email,
     targetLat, targetLng, siteName,
     pkg, paymentMethod,
-    hive: reserved,
+    hive: reservation.hive,
+    droneId: reservation.drone.id,
   });
-  startDroneForOrder(order);
-  res.status(201).json({ orderId: order.id, hive: reserved });
+  startDroneForOrder(order, reservation.drone.battery);
+  res.status(201).json({ orderId: order.id, hive: reservation.hive, drone: reservation.drone });
+});
+
+app.get('/orders', requireAuth, (req, res) => {
+  const orders = orderStore.listOrdersForUser(req.user.uid);
+  res.json({ orders });
 });
 
 app.get('/orders/:id', requireAuth, (req, res) => {
   const order = orderStore.getOrder(req.params.id);
   if (!order) return res.status(404).json({ error: 'Order not found' });
+  if (order.userId !== req.user.uid) return res.status(403).json({ error: 'Not your order' });
   const drone = drones.get(order.id);
   res.json({ order, drone: drone ? drone.snapshot() : null });
 });
@@ -184,20 +200,22 @@ const io = new SocketIOServer(server, {
 });
 
 // ── Drone lifecycle helpers ──────────────────────────────
-function startDroneForOrder(order) {
-  let droneReleased = false;
-  const releaseHiveSlot = () => {
-    if (droneReleased) return;
-    droneReleased = true;
-    const updated = hiveStore.releaseDrone(order.hive.id);
+function startDroneForOrder(order, startBattery) {
+  let released = false;
+  const releaseHiveSlot = (finalBattery) => {
+    if (released) return;
+    released = true;
+    const updated = hiveStore.releaseDrone(order.hive.id, order.droneId, finalBattery);
     if (updated) io.emit('hive:updated', updated);
   };
 
   const drone = new Drone({
     orderId: order.id,
+    droneId: order.droneId,
     hive: order.hive,
     target: { latitude: order.targetLat, longitude: order.targetLng },
     durationSec: order.package.durationSec,
+    startBattery: typeof startBattery === 'number' ? startBattery : 100,
     onState: (state) => {
       io.to(`order:${order.id}`).emit('drone:state', state);
       io.to('viewers').emit('drone:state', state);
@@ -214,22 +232,34 @@ function startDroneForOrder(order) {
   drones.set(order.id, drone);
   drone.start();
 
-  // Auto-cleanup once DELIVERED so we don't leak memory + free the hive slot.
   const watcher = setInterval(() => {
     if (drone.status === STATUS.DELIVERED) {
       clearInterval(watcher);
-      releaseHiveSlot();
-      // Keep the drone object around for ~30 s in case the client refetches.
+      // Pick the media that "the drone shot" and stamp it on the order.
+      const media = pickMedia(order.package);
+      orderStore.markDelivered(order.id, media);
+      const deliveredPayload = { orderId: order.id, media, deliveredAt: Date.now() };
+      io.to(`order:${order.id}`).emit('order:delivered', deliveredPayload);
+      io.to('viewers').emit('order:delivered', deliveredPayload);
+      releaseHiveSlot(drone.battery);
       setTimeout(() => drones.delete(order.id), 30000);
     }
-  }, 2000);
+  }, 1000);
 }
+
+// ── Charging tick — 1 Hz, broadcasts updated hives ───────
+setInterval(() => {
+  const changedIds = hiveStore.tickCharging(1);
+  for (const id of changedIds) {
+    const hive = hiveStore.getHive(id);
+    if (hive) io.emit('hive:updated', hive);
+  }
+}, 1000);
 
 // ── Socket.IO routing ────────────────────────────────────
 io.on('connection', (socket) => {
   socket.on('hello:viewer', () => {
     socket.join('viewers');
-    // Send current snapshot of everything.
     socket.emit('hives:snapshot', { hives: hiveStore.listHives() });
     for (const drone of drones.values()) socket.emit('drone:state', drone.snapshot());
   });
@@ -239,6 +269,12 @@ io.on('connection', (socket) => {
     socket.join(`order:${orderId}`);
     const drone = drones.get(orderId);
     if (drone) socket.emit('drone:state', drone.snapshot());
+    const order = orderStore.getOrder(orderId);
+    if (order?.media) {
+      socket.emit('order:delivered', {
+        orderId, media: order.media, deliveredAt: order.deliveredAt,
+      });
+    }
   });
 
   socket.on('user:location', ({ orderId, latitude, longitude } = {}) => {
@@ -246,13 +282,17 @@ io.on('connection', (socket) => {
     const drone = drones.get(orderId);
     if (!drone) return;
     drone.updateUserTarget({ latitude, longitude });
-    // Also let viewers see the user dot.
     io.to('viewers').emit('user:location', { orderId, latitude, longitude });
   });
 
   socket.on('session:start', ({ orderId } = {}) => {
     const drone = drones.get(orderId);
     if (drone) drone.startSession();
+  });
+
+  socket.on('session:end', ({ orderId } = {}) => {
+    const drone = drones.get(orderId);
+    if (drone) drone.endSessionEarly();
   });
 });
 

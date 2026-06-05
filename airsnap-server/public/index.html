@@ -5,71 +5,107 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AirSnap — Live Drone Simulation</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #0F0F1A;
-      --bg-card: #1A1A2E;
-      --primary: #4F8EF7;
-      --accent: #FFD700;
-      --success: #34C759;
-      --warning: #FF9500;
-      --error: #FF3B30;
-      --text: #FFFFFF;
-      --text-muted: #8E8E93;
-      --border: #2C2C3E;
+      --bg:        #0B0B14;
+      --bg-card:   #16162A;
+      --bg-card-2: #1E1E36;
+      --primary:   #4F8EF7;
+      --primary-2: #7AA7FF;
+      --accent:    #FFD24D;
+      --success:   #34D27A;
+      --warning:   #FF9F2D;
+      --error:     #FF4D4D;
+      --charging:  #5AC8FA;
+      --text:      #FFFFFF;
+      --text-2:    #B8B8C5;
+      --text-3:    #6E6E80;
+      --border:    #262642;
+      --shadow:    0 8px 24px rgba(0,0,0,0.4);
     }
     * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
     body {
-      margin: 0;
-      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-family: 'Inter', -apple-system, "Segoe UI", Roboto, sans-serif;
       background: var(--bg);
       color: var(--text);
       height: 100vh;
       overflow: hidden;
+      letter-spacing: -0.01em;
     }
-    .layout { display: grid; grid-template-columns: 1fr 360px; height: 100vh; }
-    #map { background: #0a0a1a; }
-    .leaflet-container { background: #0a0a1a; }
+    .layout { display: grid; grid-template-columns: 1fr 380px; height: 100vh; }
+    #map { background: #07070d; }
+    .leaflet-container { background: #07070d; font-family: 'Inter', sans-serif; }
+    .leaflet-control-attribution {
+      background: rgba(11,11,20,0.7) !important;
+      color: var(--text-3) !important;
+      font-size: 10px !important;
+    }
+    .leaflet-control-attribution a { color: var(--primary-2) !important; }
+
     .panel {
-      padding: 16px;
-      background: var(--bg-card);
+      padding: 22px 18px;
+      background: linear-gradient(180deg, #16162A 0%, #0F0F1F 100%);
       border-left: 1px solid var(--border);
       overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
     }
-    .panel h1 {
-      margin: 0 0 4px 0;
-      font-size: 18px;
-      font-weight: 800;
+    .panel::-webkit-scrollbar { width: 6px; }
+    .panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .header {
+      display: flex; align-items: baseline; gap: 8px;
+      margin-bottom: 4px;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+    .header h1 span { color: var(--primary); }
+    .live-tag {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 10px; font-weight: 700;
+      color: var(--success);
+      background: rgba(52, 210, 122, 0.12);
+      padding: 3px 8px;
+      border-radius: 999px;
       letter-spacing: 0.5px;
+      text-transform: uppercase;
     }
-    .panel h1 span { color: var(--primary); }
-    .panel .sub {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-bottom: 16px;
-    }
-    .status-dot {
-      display: inline-block;
-      width: 8px; height: 8px;
-      border-radius: 50%;
+    .live-tag::before {
+      content: '';
+      width: 6px; height: 6px;
       background: var(--success);
-      margin-right: 6px;
-      vertical-align: middle;
+      border-radius: 50%;
+      animation: blink 1.4s infinite;
     }
-    .status-dot.off { background: var(--error); }
-    .section {
-      background: rgba(255,255,255,0.03);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 12px;
-      margin-bottom: 12px;
-    }
-    .section h2 {
+    @keyframes blink { 50% { opacity: 0.3; } }
+    .sub {
       font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 1px;
-      color: var(--text-muted);
-      margin: 0 0 8px 0;
+      color: var(--text-3);
+      margin-bottom: 18px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 12px;
+      box-shadow: var(--shadow);
+    }
+    .card h2 {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      color: var(--text-3);
+      margin: 0 0 12px 0;
       text-transform: uppercase;
     }
     .row {
@@ -79,85 +115,207 @@
       font-size: 13px;
       padding: 4px 0;
     }
-    .row .label { color: var(--text-muted); }
-    .row .value { font-weight: 600; }
-    .order-card {
-      background: rgba(79, 142, 247, 0.08);
-      border: 1px solid rgba(79, 142, 247, 0.25);
+    .row .label { color: var(--text-2); font-weight: 500; }
+    .row .value { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+
+    .conn-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+    .conn-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+    .conn-dot.off { background: var(--error); box-shadow: 0 0 8px var(--error); }
+
+    /* Fleet metrics grid */
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .metric {
+      background: var(--bg-card-2);
       border-radius: 10px;
+      padding: 8px 4px;
+      text-align: center;
+    }
+    .metric .v { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .metric .l { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-3); margin-top: 2px; font-weight: 600; }
+    .metric.idle .v     { color: var(--success); }
+    .metric.flying .v   { color: var(--primary); }
+    .metric.charging .v { color: var(--charging); }
+
+    /* Hive section */
+    .hive-block {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+      box-shadow: var(--shadow);
+    }
+    .hive-block .hname {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 14px; font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .hive-block .hname .badge {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--accent);
+      background: rgba(255, 210, 77, 0.15);
+      padding: 3px 8px;
+      border-radius: 999px;
+      letter-spacing: 0.5px;
+    }
+    .drone-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      background: var(--bg-card-2);
+      border: 1px solid var(--border);
+    }
+    .pill .dot { width: 7px; height: 7px; border-radius: 50%; }
+    .pill.idle      { color: var(--success);  border-color: rgba(52, 210, 122, 0.4); }
+    .pill.idle .dot { background: var(--success);  box-shadow: 0 0 6px var(--success); }
+    .pill.flying    { color: var(--primary);  border-color: rgba(79, 142, 247, 0.4); }
+    .pill.flying .dot { background: var(--primary); }
+    .pill.charging  { color: var(--charging); border-color: rgba(90, 200, 250, 0.4); }
+    .pill.charging .dot {
+      background: var(--charging);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    .pill.low       { color: var(--warning); border-color: rgba(255, 159, 45, 0.4); }
+    .pill.low .dot  { background: var(--warning); }
+    @keyframes pulse { 50% { opacity: 0.4; } }
+
+    /* Active orders */
+    .order-card {
+      background: linear-gradient(135deg, rgba(79, 142, 247, 0.10) 0%, rgba(79, 142, 247, 0.04) 100%);
+      border: 1px solid rgba(79, 142, 247, 0.25);
+      border-radius: 12px;
       padding: 10px 12px;
       margin-bottom: 8px;
     }
-    .order-card .id { font-size: 11px; color: var(--text-muted); letter-spacing: 0.5px; }
+    .order-card .id { font-size: 10.5px; color: var(--text-3); letter-spacing: 0.5px; font-weight: 600; }
     .order-card .status {
       display: inline-block;
-      font-size: 10px;
-      font-weight: 700;
-      padding: 2px 8px;
+      font-size: 9.5px;
+      font-weight: 800;
+      padding: 3px 9px;
       border-radius: 999px;
       background: var(--primary);
       color: #fff;
       text-transform: uppercase;
-      letter-spacing: 0.8px;
+      letter-spacing: 0.9px;
       margin-top: 4px;
     }
-    .order-card .status.pending    { background: #555; }
+    .order-card .status.pending    { background: #666; }
     .order-card .status.en_route   { background: var(--primary); }
-    .order-card .status.arrived    { background: var(--accent); color: #000; }
+    .order-card .status.arrived    { background: var(--accent); color: #1a1a1a; }
     .order-card .status.recording  { background: var(--error); }
     .order-card .status.returning  { background: var(--warning); }
-    .order-card .status.processing { background: var(--text-muted); }
+    .order-card .status.processing { background: var(--text-3); }
     .order-card .status.delivered  { background: var(--success); }
     .order-card .stats {
-      font-size: 12px;
-      color: var(--text-muted);
+      font-size: 11.5px;
+      color: var(--text-3);
       margin-top: 6px;
+      line-height: 1.5;
     }
-    .order-card .stats span { color: var(--text); font-weight: 600; }
+    .order-card .stats b { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+
     .empty {
       font-size: 12px;
-      color: var(--text-muted);
-      padding: 8px 0;
+      color: var(--text-3);
+      padding: 12px 0;
       text-align: center;
+      font-style: italic;
     }
 
-    /* Custom drone marker */
+    /* Marker styles */
     .drone-marker {
-      width: 28px; height: 28px;
+      width: 32px; height: 32px;
       display: flex;
       align-items: center;
       justify-content: center;
     }
-    .drone-marker svg { width: 100%; height: 100%; filter: drop-shadow(0 0 6px rgba(79, 142, 247, 0.8)); }
-    .hive-marker {
-      background: var(--accent);
-      border: 3px solid #000;
+    .drone-marker .body {
+      width: 100%; height: 100%;
+      transition: transform 0.1s linear;
+      filter: drop-shadow(0 0 8px rgba(79, 142, 247, 0.9));
+    }
+    .drone-marker.low .body { filter: drop-shadow(0 0 8px rgba(255, 159, 45, 0.9)); }
+    .drone-marker .rotor {
+      position: absolute;
+      width: 12px; height: 12px;
       border-radius: 50%;
-      box-shadow: 0 0 0 2px var(--accent), 0 0 12px rgba(255, 215, 0, 0.6);
+      background: rgba(255,255,255,0.18);
+      animation: spin 0.15s linear infinite;
+    }
+    .drone-marker .rotor.tl { top: 0;    left: 0; }
+    .drone-marker .rotor.tr { top: 0;    right: 0; }
+    .drone-marker .rotor.bl { bottom: 0; left: 0; }
+    .drone-marker .rotor.br { bottom: 0; right: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .hive-marker-wrap {
+      position: relative;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #000;
+    }
+    .hive-marker {
+      background: linear-gradient(135deg, #FFD24D, #FFB733);
+      border: 3px solid #1A1A2E;
+      border-radius: 50%;
+      box-shadow: 0 0 0 2px rgba(255, 210, 77, 0.6), 0 0 16px rgba(255, 210, 77, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #1A1A2E;
       font-weight: 800;
       font-size: 11px;
       letter-spacing: 0.3px;
+      font-family: 'Inter', sans-serif;
+      position: relative;
+      z-index: 2;
     }
     .hive-marker.full {
-      background: #555;
-      box-shadow: 0 0 0 2px #555, 0 0 12px rgba(0,0,0,0.6);
-      color: #aaa;
+      background: linear-gradient(135deg, #4A4A6E, #3A3A5E);
+      box-shadow: 0 0 0 2px rgba(110, 110, 128, 0.4);
+      color: #B8B8C5;
     }
+    .hive-marker.charging {
+      background: linear-gradient(135deg, #5AC8FA, #4FA8E6);
+      color: #fff;
+      animation: charge-pulse 1.6s ease-in-out infinite;
+    }
+    @keyframes charge-pulse {
+      0%, 100% { box-shadow: 0 0 0 2px rgba(90, 200, 250, 0.6), 0 0 16px rgba(90, 200, 250, 0.4); }
+      50%      { box-shadow: 0 0 0 4px rgba(90, 200, 250, 0.8), 0 0 24px rgba(90, 200, 250, 0.6); }
+    }
+
     .user-marker {
-      width: 16px; height: 16px;
+      width: 18px; height: 18px;
       background: #00C7FF;
       border: 3px solid #fff;
       border-radius: 50%;
-      box-shadow: 0 0 12px rgba(0, 199, 255, 0.7);
+      box-shadow: 0 0 14px rgba(0, 199, 255, 0.7);
     }
 
-    @media (max-width: 800px) {
+    @media (max-width: 900px) {
       .layout { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
-      .panel { border-left: none; border-top: 1px solid var(--border); max-height: 40vh; }
+      .panel { border-left: none; border-top: 1px solid var(--border); max-height: 50vh; }
     }
   </style>
 </head>
@@ -165,37 +323,38 @@
   <div class="layout">
     <div id="map"></div>
     <div class="panel">
-      <h1>Air<span>Snap</span></h1>
-      <div class="sub">Live drone simulation</div>
+      <div class="header">
+        <h1>Air<span>Snap</span></h1>
+        <span class="live-tag">Live</span>
+      </div>
+      <div class="sub">Real-time drone simulation</div>
 
-      <div class="section">
-        <div class="row">
-          <span class="label"><span class="status-dot off" id="conn-dot"></span>Connection</span>
-          <span class="value" id="conn-text">connecting…</span>
-        </div>
-        <div class="row">
-          <span class="label">Hives</span>
-          <span class="value" id="hive-count">0</span>
-        </div>
-        <div class="row">
-          <span class="label">Active drones</span>
-          <span class="value" id="drone-count">0</span>
+      <div class="card">
+        <div class="conn-row">
+          <span class="conn-dot off" id="conn-dot"></span>
+          <span id="conn-text">connecting…</span>
         </div>
       </div>
 
-      <div class="section">
-        <h2>Active orders</h2>
-        <div id="orders"></div>
+      <div class="card">
+        <h2>Fleet status</h2>
+        <div class="metrics">
+          <div class="metric"><div class="v" id="m-total">0</div><div class="l">Drones</div></div>
+          <div class="metric idle"><div class="v" id="m-idle">0</div><div class="l">Idle</div></div>
+          <div class="metric flying"><div class="v" id="m-flying">0</div><div class="l">Flying</div></div>
+          <div class="metric charging"><div class="v" id="m-charging">0</div><div class="l">Charging</div></div>
+        </div>
+        <div class="row" style="margin-top: 10px;">
+          <span class="label">Average battery</span>
+          <span class="value" id="m-avg-bat">—</span>
+        </div>
       </div>
 
-      <div class="section">
-        <h2>How it works</h2>
-        <p style="font-size: 12px; color: var(--text-muted); margin: 0; line-height: 1.5;">
-          The mobile app places an order. The server picks the nearest hive,
-          spawns a simulated drone, and broadcasts its position every 100 ms.
-          Watch it climb, cruise, descend, orbit the user, and return.
-        </p>
-      </div>
+      <h2 style="font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: var(--text-3); margin: 18px 0 10px 0; text-transform: uppercase;">Hives</h2>
+      <div id="hives-list"></div>
+
+      <h2 style="font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: var(--text-3); margin: 18px 0 10px 0; text-transform: uppercase;">Active orders</h2>
+      <div id="orders"></div>
     </div>
   </div>
 

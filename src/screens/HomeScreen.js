@@ -6,9 +6,11 @@
  *
  *  Behavior:
  *    • Entire screen is the map
- *    • 500m delivery circle around the Hive
+ *    • One 500m delivery circle around each hive (live from server)
  *    • Order button uses current location when user is in range
- *    • Help icon runs demo tour when user is out of range
+ *      of ANY hive that has an available drone
+ *    • Help icon runs demo tour when user is in range
+ *    • Hive map updates in real time as admins place/remove hives
  * ============================================================
  */
 
@@ -34,20 +36,21 @@ import {
 import { ScreenWrapper, GradientButton, TourTooltip, tourTooltipShellStyle } from '../components/common';
 import { useTheme, useLocation, useTour } from '../context';
 import { Spacing } from '../theme';
-import {
-  DRONE_HIVE,
-  DELIVERY_ZONE_RADIUS_METERS,
-} from '../constants';
+import { DELIVERY_ZONE_RADIUS_METERS } from '../constants';
 import { haversineDistanceMeters } from '../utils/geofence';
+import { simApi, getSimClient } from '../services/SimClient';
 
 const WalkthroughableView = walkthroughable(View);
 
-const DroneHiveMarker = React.memo(function DroneHiveMarker({ fill = '#0A84FF' }) {
+// Fallback view when no hives are configured yet (so the map isn't blank).
+const DEFAULT_REGION = { latitude: 31.8312, longitude: 35.1286, latitudeDelta: 0.05, longitudeDelta: 0.05 };
+
+const DroneHiveMarker = React.memo(function DroneHiveMarker({ fill = '#0A84FF', available = 0, capacity = 0 }) {
   return (
-    <Svg width={34} height={34} viewBox="0 0 34 34">
-      <Circle cx="17" cy="17" r="16" fill={fill} />
-      <Path d="M17 6L26 12V22L17 28L8 22V12L17 6Z" fill="#FFFFFF" />
-      <Circle cx="17" cy="17" r="4" fill="#00D4AA" />
+    <Svg width={40} height={40} viewBox="0 0 40 40">
+      <Circle cx="20" cy="20" r="19" fill={fill} stroke="#fff" strokeWidth="1.5" />
+      <Path d="M20 7L31 14V26L20 33L9 26V14L20 7Z" fill="#FFFFFF" />
+      <Circle cx="20" cy="20" r="5" fill="#00D4AA" />
     </Svg>
   );
 });
@@ -79,25 +82,62 @@ function HomeMapContent({ navigation }) {
   const autoStartedRef = useRef(false);
   const [isMapReady, setIsMapReady] = useState(false);
   const [currentGuideStepName, setCurrentGuideStepName] = useState(null);
+  const [hives, setHives] = useState([]);
+
+  // ── Live hives from server ──────────────────────────────
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await simApi.listHives();
+        if (mounted) setHives(res.hives || []);
+      } catch (_) { /* offline → empty list, geofence will say "no hives" */ }
+    })();
+
+    const sim = getSimClient();
+    sim.connect().catch(() => {});
+    const offCreate = sim.onHiveCreated((hive) => {
+      setHives((prev) => (prev.some((h) => h.id === hive.id) ? prev : [...prev, hive]));
+    });
+    const offUpdate = sim.onHiveUpdated((hive) => {
+      setHives((prev) => prev.map((h) => (h.id === hive.id ? hive : h)));
+    });
+    const offDelete = sim.onHiveDeleted(({ id }) => {
+      setHives((prev) => prev.filter((h) => h.id !== id));
+    });
+    return () => {
+      mounted = false;
+      offCreate();
+      offUpdate();
+      offDelete();
+    };
+  }, []);
 
   const userCoords = useMemo(() => {
     if (!position) return null;
-    return {
-      latitude: position.latitude,
-      longitude: position.longitude,
-    };
+    return { latitude: position.latitude, longitude: position.longitude };
   }, [position]);
 
-  const distanceToHiveMeters = useMemo(() => {
-    if (!userCoords) return null;
-    return haversineDistanceMeters(userCoords, DRONE_HIVE);
-  }, [userCoords]);
+  // ── Nearest hive to the user ────────────────────────────
+  const nearestHiveEntry = useMemo(() => {
+    if (!userCoords || !hives.length) return null;
+    let best = null;
+    for (const h of hives) {
+      const d = haversineDistanceMeters(userCoords, h);
+      if (!best || d < best.distanceMeters) best = { hive: h, distanceMeters: d };
+    }
+    return best;
+  }, [userCoords, hives]);
 
+  const distanceToHiveMeters = nearestHiveEntry?.distanceMeters ?? null;
   const isInsideDeliveryZone = useMemo(() => {
     if (distanceToHiveMeters == null) return false;
     return distanceToHiveMeters <= DELIVERY_ZONE_RADIUS_METERS;
   }, [distanceToHiveMeters]);
 
+  // ── Order CTA + helper text ────────────────────────────
+  const nearestHive = nearestHiveEntry?.hive;
+  const nearestHiveAvailable = nearestHive?.available ?? 0;
   const handleOrderFromLiveLocation = useCallback(() => {
     if (!userCoords || !isInsideDeliveryZone) return;
     navigation.navigate('PackageSelect', {
@@ -108,64 +148,56 @@ function HomeMapContent({ navigation }) {
     });
   }, [navigation, userCoords, isInsideDeliveryZone]);
 
-  const isOrderEnabled = Boolean(userCoords && isInsideDeliveryZone);
+  const isOrderEnabled = Boolean(
+    userCoords && isInsideDeliveryZone && nearestHiveAvailable > 0
+  );
+
+  // ── Compute camera target for tour transitions ─────────
+  const cameraTarget = useMemo(() => {
+    if (nearestHive) return { latitude: nearestHive.latitude, longitude: nearestHive.longitude };
+    if (hives.length) return { latitude: hives[0].latitude, longitude: hives[0].longitude };
+    if (userCoords) return userCoords;
+    return { latitude: DEFAULT_REGION.latitude, longitude: DEFAULT_REGION.longitude };
+  }, [nearestHive, hives, userCoords]);
 
   const getCircleFitCoordinates = useCallback(() => {
+    if (!nearestHive) return [cameraTarget];
     const latOffset = DELIVERY_ZONE_RADIUS_METERS / 111320;
-    const latRad = (DRONE_HIVE.latitude * Math.PI) / 180;
+    const latRad = (nearestHive.latitude * Math.PI) / 180;
     const metersPerDegreeLng = 111320 * Math.cos(latRad);
     const lngOffset = DELIVERY_ZONE_RADIUS_METERS / metersPerDegreeLng;
-
     return [
-      DRONE_HIVE,
-      { latitude: DRONE_HIVE.latitude + latOffset, longitude: DRONE_HIVE.longitude },
-      { latitude: DRONE_HIVE.latitude - latOffset, longitude: DRONE_HIVE.longitude },
-      { latitude: DRONE_HIVE.latitude, longitude: DRONE_HIVE.longitude + lngOffset },
-      { latitude: DRONE_HIVE.latitude, longitude: DRONE_HIVE.longitude - lngOffset },
+      { latitude: nearestHive.latitude, longitude: nearestHive.longitude },
+      { latitude: nearestHive.latitude + latOffset, longitude: nearestHive.longitude },
+      { latitude: nearestHive.latitude - latOffset, longitude: nearestHive.longitude },
+      { latitude: nearestHive.latitude, longitude: nearestHive.longitude + lngOffset },
+      { latitude: nearestHive.latitude, longitude: nearestHive.longitude - lngOffset },
     ];
-  }, []);
+  }, [nearestHive, cameraTarget]);
 
   useEffect(() => {
     if (!copilotEvents) return undefined;
-
     const onStepChange = (step) => {
       if (!mapRef.current || !step?.name) return;
       setCurrentGuideStepName(step.name);
-
       if (step.name === 'hiveMarker') {
         mapRef.current.animateToRegion(
-          {
-            latitude: DRONE_HIVE.latitude,
-            longitude: DRONE_HIVE.longitude,
-            latitudeDelta: 0.028,
-            longitudeDelta: 0.028,
-          },
+          { ...cameraTarget, latitudeDelta: 0.028, longitudeDelta: 0.028 },
           520
         );
       }
-
       if (step.name === 'border') {
         mapRef.current.fitToCoordinates(getCircleFitCoordinates(), {
-          edgePadding: {
-            top: 100,
-            right: 90,
-            bottom: 180,
-            left: 90,
-          },
+          edgePadding: { top: 100, right: 90, bottom: 180, left: 90 },
           animated: true,
         });
       }
     };
-
-    const onStart = () => {
-      setCurrentGuideStepName('hiveMarker');
-    };
-
+    const onStart = () => setCurrentGuideStepName('hiveMarker');
     const onStop = () => {
       setCurrentGuideStepName(null);
       endTour();
     };
-
     copilotEvents.on('start', onStart);
     copilotEvents.on('stepChange', onStepChange);
     copilotEvents.on('stop', onStop);
@@ -174,7 +206,7 @@ function HomeMapContent({ navigation }) {
       copilotEvents.off('stepChange', onStepChange);
       copilotEvents.off('stop', onStop);
     };
-  }, [copilotEvents, endTour, getCircleFitCoordinates]);
+  }, [copilotEvents, endTour, getCircleFitCoordinates, cameraTarget]);
 
   const startGuide = useCallback(() => {
     if (!isMapReady) {
@@ -182,32 +214,19 @@ function HomeMapContent({ navigation }) {
       return;
     }
     mapRef.current?.animateToRegion(
-      {
-        latitude: DRONE_HIVE.latitude,
-        longitude: DRONE_HIVE.longitude,
-        latitudeDelta: 0.08,
-        longitudeDelta: 0.08,
-      },
+      { ...cameraTarget, latitudeDelta: 0.08, longitudeDelta: 0.08 },
       280
     );
+    setTimeout(() => start(), 320);
+  }, [isMapReady, start, cameraTarget]);
 
-    setTimeout(() => {
-      start();
-    }, 320);
-  }, [isMapReady, start]);
-
-  const hiveMarkerColor =
-    currentGuideStepName === 'hiveMarker' ? '#FF3B30' : '#0A84FF';
-
+  const baseHiveColor = '#0A84FF';
+  const focusedHiveColor = '#FF3B30';
+  const hiveMarkerColor = currentGuideStepName === 'hiveMarker' ? focusedHiveColor : baseHiveColor;
   const borderStrokeColor =
-    currentGuideStepName === 'border'
-      ? 'rgba(255,59,48,0.98)'
-      : 'rgba(10,132,255,0.95)';
-
+    currentGuideStepName === 'border' ? 'rgba(255,59,48,0.98)' : 'rgba(10,132,255,0.95)';
   const borderFillColor =
-    currentGuideStepName === 'border'
-      ? 'rgba(255,59,48,0.16)'
-      : 'rgba(10,132,255,0.12)';
+    currentGuideStepName === 'border' ? 'rgba(255,59,48,0.16)' : 'rgba(10,132,255,0.12)';
 
   const handleGuidePress = useCallback(() => {
     if (!isInsideDeliveryZone) {
@@ -229,20 +248,23 @@ function HomeMapContent({ navigation }) {
         await AsyncStorage.setItem(FIRST_LAUNCH_KEY, '1');
         startTour();
         startGuide();
-      } catch {
-        // ignore — tour is non-critical
-      }
+      } catch { /* ignore — tour is non-critical */ }
     })();
     return () => { cancelled = true; };
   }, [isMapReady, isInsideDeliveryZone, startGuide, startTour]);
 
+  // ── Helper text ────────────────────────────────────────
   let orderHelperText = 'Waiting for high-accuracy location lock...';
   if (permissionStatus !== 'granted') {
     orderHelperText = 'Location permission is required to check delivery eligibility.';
+  } else if (!hives.length) {
+    orderHelperText = 'No hives configured yet. Ask an admin to place one.';
   } else if (userCoords && !isInsideDeliveryZone) {
     orderHelperText = 'You are currently outside the delivery zone.';
+  } else if (isInsideDeliveryZone && nearestHiveAvailable === 0) {
+    orderHelperText = 'In range, but all drones at this hive are recharging.';
   } else if (isOrderEnabled) {
-    orderHelperText = 'You are inside the delivery zone.';
+    orderHelperText = `You are inside the delivery zone. ${nearestHiveAvailable} drone${nearestHiveAvailable === 1 ? '' : 's'} ready.`;
   }
 
   return (
@@ -251,33 +273,37 @@ function HomeMapContent({ navigation }) {
         <MapView
           ref={mapRef}
           style={styles.fullMap}
-          initialRegion={{
-            latitude: DRONE_HIVE.latitude,
-            longitude: DRONE_HIVE.longitude,
-            latitudeDelta: 0.02,
-            longitudeDelta: 0.02,
-          }}
+          initialRegion={
+            hives.length
+              ? { latitude: hives[0].latitude, longitude: hives[0].longitude, latitudeDelta: 0.02, longitudeDelta: 0.02 }
+              : DEFAULT_REGION
+          }
           mapType="mutedStandard"
           showsCompass
           showsScale
           scrollEnabled
           zoomEnabled
           rotateEnabled={false}
-          onMapReady={() => {
-            setIsMapReady(true);
-          }}
+          onMapReady={() => setIsMapReady(true)}
         >
-          <MapCircle
-            center={DRONE_HIVE}
-            radius={DELIVERY_ZONE_RADIUS_METERS}
-            strokeColor={borderStrokeColor}
-            fillColor={borderFillColor}
-            strokeWidth={2}
-          />
-
-          <Marker coordinate={DRONE_HIVE} tracksViewChanges={false}>
-            <DroneHiveMarker fill={hiveMarkerColor} />
-          </Marker>
+          {hives.map((hive) => (
+            <React.Fragment key={hive.id}>
+              <MapCircle
+                center={hive}
+                radius={DELIVERY_ZONE_RADIUS_METERS}
+                strokeColor={borderStrokeColor}
+                fillColor={borderFillColor}
+                strokeWidth={2}
+              />
+              <Marker coordinate={hive} tracksViewChanges={false}>
+                <DroneHiveMarker
+                  fill={hive.id === nearestHive?.id ? hiveMarkerColor : baseHiveColor}
+                  available={hive.available}
+                  capacity={hive.capacity}
+                />
+              </Marker>
+            </React.Fragment>
+          ))}
 
           {userCoords && (
             <Marker coordinate={userCoords} tracksViewChanges={false}>
@@ -296,7 +322,7 @@ function HomeMapContent({ navigation }) {
         </TouchableOpacity>
 
         {/* Hidden anchors keep step order stable while map color/zoom drives the demo focus. */}
-        <CopilotStep text="This is the Hive launch point in Har Adar." order={1} name="hiveMarker">
+        <CopilotStep text="This is your nearest drone hive." order={1} name="hiveMarker">
           <WalkthroughableView pointerEvents="none" style={styles.hiddenGuideAnchorTop} />
         </CopilotStep>
 
@@ -311,8 +337,10 @@ function HomeMapContent({ navigation }) {
         {/* Bottom status panel */}
         <View style={[styles.bottomPanel, { backgroundColor: colors.bgCard + 'EE' }]}>
           <View style={styles.metaRow}>
-            <Text style={[styles.metaText, { color: colors.textSecondary }]}>Hive: Har Adar, Nof Harem 135</Text>
-            <Text style={[styles.metaText, { color: colors.textSecondary }]}>500 meters active border</Text>
+            <Text style={[styles.metaText, { color: colors.textSecondary }]} numberOfLines={1}>
+              {nearestHive ? `Nearest hive: ${nearestHive.name}` : `${hives.length} hive${hives.length === 1 ? '' : 's'} placed`}
+            </Text>
+            <Text style={[styles.metaText, { color: colors.textSecondary }]}>500 m active border</Text>
           </View>
 
           <View style={[styles.statusPill, { backgroundColor: isInsideDeliveryZone ? colors.success + '22' : colors.warning + '22' }]}>
@@ -327,7 +355,9 @@ function HomeMapContent({ navigation }) {
           </View>
 
           <Text style={[styles.orderHelper, { color: colors.textMuted }]}>
-            {distanceToHiveMeters == null ? orderHelperText : `${orderHelperText} Distance ${(distanceToHiveMeters / 1000).toFixed(2)} km`}
+            {distanceToHiveMeters == null
+              ? orderHelperText
+              : `${orderHelperText} Distance ${(distanceToHiveMeters / 1000).toFixed(2)} km`}
           </Text>
 
           {permissionStatus !== 'granted' && (
@@ -362,7 +392,6 @@ function HomeMapContent({ navigation }) {
               />
             </WalkthroughableView>
           </CopilotStep>
-
         </View>
       </View>
     </ScreenWrapper>
@@ -372,12 +401,7 @@ function HomeMapContent({ navigation }) {
 export default function HomeScreen(props) {
   return (
     <CopilotProvider
-      labels={{
-        previous: 'Back',
-        next: 'Next',
-        skip: 'Skip',
-        finish: 'Done',
-      }}
+      labels={{ previous: 'Back', next: 'Next', skip: 'Skip', finish: 'Done' }}
       tooltipComponent={TourTooltip}
       tooltipStyle={tourTooltipShellStyle}
       stepNumberComponent={() => null}
@@ -393,16 +417,9 @@ export default function HomeScreen(props) {
 }
 
 const styles = StyleSheet.create({
-  fullScreenContent: {
-    flex: 1,
-  },
-  mapRoot: {
-    flex: 1,
-    position: 'relative',
-  },
-  fullMap: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  fullScreenContent: { flex: 1 },
+  mapRoot: { flex: 1, position: 'relative' },
+  fullMap: { ...StyleSheet.absoluteFillObject },
 
   helpBtn: {
     position: 'absolute',
@@ -418,74 +435,44 @@ const styles = StyleSheet.create({
 
   hiddenGuideAnchorTop: {
     position: 'absolute',
-    width: 4,
-    height: 4,
-    left: Spacing.md,
-    top: 92,
+    width: 4, height: 4,
+    left: Spacing.md, top: 92,
     backgroundColor: 'transparent',
     opacity: 0.01,
   },
   hiddenGuideAnchorMid: {
     position: 'absolute',
-    width: 4,
-    height: 4,
-    left: Spacing.md,
-    top: 150,
+    width: 4, height: 4,
+    left: Spacing.md, top: 150,
     backgroundColor: 'transparent',
     opacity: 0.01,
   },
 
   bottomPanel: {
     position: 'absolute',
-    left: Spacing.md,
-    right: Spacing.md,
-    bottom: Spacing.md,
+    left: Spacing.md, right: Spacing.md, bottom: Spacing.md,
     borderRadius: Spacing.radiusLg,
     padding: Spacing.md,
     zIndex: 30,
   },
-  metaRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  metaText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
+  metaRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  metaText: { fontSize: 12, fontWeight: '600', flex: 1, marginRight: 8 },
 
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 10, paddingVertical: 6,
     marginTop: Spacing.xs,
   },
-  statusPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-    marginLeft: 6,
-  },
+  statusPillText: { fontSize: 12, fontWeight: '700', marginLeft: 6 },
 
-  errorText: {
-    marginTop: Spacing.xs,
-    fontSize: 12,
-    lineHeight: 18,
-  },
+  errorText: { marginTop: Spacing.xs, fontSize: 12, lineHeight: 18 },
 
-  permissionActionsRow: {
-    marginTop: Spacing.md,
-  },
-  permissionBtn: {
-    marginBottom: Spacing.sm,
-  },
+  permissionActionsRow: { marginTop: Spacing.md },
+  permissionBtn: { marginBottom: Spacing.sm },
 
-  orderButton: {
-    marginTop: Spacing.md,
-  },
-  orderHelper: {
-    marginTop: Spacing.xs,
-    fontSize: 12,
-  },
+  orderButton: { marginTop: Spacing.md },
+  orderHelper: { marginTop: Spacing.xs, fontSize: 12 },
 });

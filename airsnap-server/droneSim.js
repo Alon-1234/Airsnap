@@ -60,8 +60,9 @@ function shortestAngle(from, to) {
 
 // ── Per-order drone instance ──────────────────────────────
 class Drone {
-  constructor({ orderId, hive, target, durationSec, onState, onStatus, onSessionProgress }) {
+  constructor({ orderId, droneId, hive, target, durationSec, startBattery, onState, onStatus, onSessionProgress }) {
     this.orderId = orderId;
+    this.droneId = droneId || null;                     // hive slot id (e.g. hive_x_d1)
     this.hive = hive;                                   // { latitude, longitude }
     this.target = { ...target };                        // { latitude, longitude }
     this.durationSec = durationSec || 30;
@@ -74,7 +75,7 @@ class Drone {
     this.pos = { east: 0, north: 0, up: 0 };
     this.vel = { east: 0, north: 0, up: 0 };
     this.heading = 0;       // radians, 0 = north
-    this.battery = 100;
+    this.battery = typeof startBattery === 'number' ? startBattery : 100;
     this.status = STATUS.PENDING;
 
     // Timing
@@ -110,6 +111,17 @@ class Drone {
     this._emitStatus(`Recording started (${this.durationSec}s)`);
   }
 
+  /**
+   * User tapped "End Session Early" in the mobile app.
+   * Transitions RECORDING → RETURNING immediately. No-op in
+   * any other state.
+   */
+  endSessionEarly() {
+    if (this.status !== STATUS.RECORDING) return;
+    this.status = STATUS.RETURNING;
+    this._emitStatus('Session ended early — returning to hive');
+  }
+
   // ── Snapshots ──
   snapshot() {
     const ll = enuMetersToLatLng(this.hive, { east: this.pos.east, north: this.pos.north });
@@ -125,6 +137,7 @@ class Drone {
     }
     return {
       orderId: this.orderId,
+      droneId: this.droneId,
       position: { latitude: ll.latitude, longitude: ll.longitude, altitude: this.pos.up },
       heading: this.heading,
       speed: Math.hypot(horizSpeed, this.vel.up),

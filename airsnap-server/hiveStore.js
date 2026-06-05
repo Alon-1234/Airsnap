@@ -1,127 +1,197 @@
 /**
- * In-memory hive store with multi-drone capacity.
+ * ============================================================
+ *  In-memory hive store with per-drone fleet + battery/charging
+ * ============================================================
+ *  Each hive owns a fleet of drone slots. Every drone has its
+ *  own battery and one of three statuses:
+ *    'idle'      — sitting at the hive, ready to dispatch
+ *    'flying'    — currently out on an order
+ *    'charging'  — back at the hive, recharging
  *
- * Each hive has:
- *   - capacity:     total drones it can dispatch
- *   - activeDrones: drones currently out on an order
+ *  Placing a hive within MERGE_RADIUS_METERS of an existing one
+ *  just adds a drone slot to that hive (no new marker).
  *
- * Placing a hive within MERGE_RADIUS_METERS of an existing one
- * increments that hive's capacity instead of creating a new marker —
- * which is what the user means by "place a couple of drones in one
- * place and it just appears as one big hive."
+ *  charge() is called externally on a 1 Hz tick (see index.js
+ *  startChargingTick) — it advances battery on every 'charging'
+ *  drone and flips it to 'idle' when full. Returns the IDs of
+ *  hives that changed so the caller can broadcast updates.
+ * ============================================================
  */
 
 const { haversineDistanceMeters } = require('./geofence');
 
-const hives = new Map(); // id -> hive
-let nextId = 1;
+const hives = new Map();
+let nextHiveId = 1;
 
-const MERGE_RADIUS_METERS = 25;   // close placements snap together
+const MERGE_RADIUS_METERS = 25;
+const MIN_DEPLOY_BATTERY  = 30;   // can't dispatch a drone below this
+const CHARGE_RATE_PER_SEC = 4;    // % per second  →  full in ~25 s
 
-function genId() {
-  return `hive_${Date.now()}_${nextId++}`;
+// ── Internal helpers ─────────────────────────────────────
+function genHiveId()  { return `hive_${Date.now()}_${nextHiveId++}`; }
+
+function makeDrone(hiveId, index) {
+  return {
+    id: `${hiveId}_d${index}`,
+    battery: 100,
+    status: 'idle',
+  };
+}
+
+function computeAvailable(hive) {
+  return hive.drones.filter(
+    (d) => d.status === 'idle' && d.battery >= MIN_DEPLOY_BATTERY
+  ).length;
 }
 
 /**
- * Returns { hive, merged } — merged=true means we added a drone to an
- * existing nearby hive instead of creating a new one.
+ * Decorate a hive with computed fields the clients consume:
+ *   capacity   — total drones
+ *   available  — drones ready to dispatch right now
+ *   activeDrones — backwards-compat alias for clients that
+ *                  still read activeDrones (=capacity-idle).
+ */
+function snapshot(hive) {
+  if (!hive) return null;
+  const idle = hive.drones.filter((d) => d.status === 'idle').length;
+  return {
+    ...hive,
+    capacity: hive.drones.length,
+    available: computeAvailable(hive),
+    activeDrones: hive.drones.length - idle,
+  };
+}
+
+// ── Hive CRUD ────────────────────────────────────────────
+
+/**
+ * Create a hive at (latitude, longitude). If another hive is
+ * within MERGE_RADIUS_METERS, add a drone slot to it instead.
+ * Returns { hive: snapshot, merged: bool }.
  */
 function createHive({ name, latitude, longitude, createdBy }) {
   if (typeof latitude !== 'number' || typeof longitude !== 'number') {
     throw new Error('latitude and longitude must be numbers');
   }
 
-  // Merge into a nearby hive if one exists.
-  for (const hive of hives.values()) {
-    const d = haversineDistanceMeters({ latitude, longitude }, hive);
+  for (const existing of hives.values()) {
+    const d = haversineDistanceMeters({ latitude, longitude }, existing);
     if (d <= MERGE_RADIUS_METERS) {
-      hive.capacity += 1;
-      hive.updatedAt = Date.now();
-      return { hive, merged: true };
+      existing.drones.push(makeDrone(existing.id, existing.drones.length + 1));
+      existing.updatedAt = Date.now();
+      return { hive: snapshot(existing), merged: true };
     }
   }
 
-  // Otherwise create a fresh hive with capacity 1.
-  const id = genId();
+  const id = genHiveId();
   const hive = {
     id,
     name: (name || 'Unnamed Hive').toString().slice(0, 80),
     latitude,
     longitude,
-    capacity: 1,
-    activeDrones: 0,
+    drones: [makeDrone(id, 1)],
     createdAt: Date.now(),
     updatedAt: Date.now(),
     createdBy: createdBy || 'admin',
   };
   hives.set(id, hive);
-  return { hive, merged: false };
+  return { hive: snapshot(hive), merged: false };
 }
 
-function deleteHive(id) {
-  return hives.delete(id);
-}
+function deleteHive(id) { return hives.delete(id); }
+function getHive(id)   { return snapshot(hives.get(id)); }
+function listHives()    { return Array.from(hives.values()).map(snapshot); }
 
-function getHive(id) {
-  return hives.get(id) || null;
-}
+// ── Reservation / release ───────────────────────────────
 
-function listHives() {
-  return Array.from(hives.values());
+/**
+ * Pick the highest-battery idle drone in the hive and mark it
+ * 'flying'. Returns the chosen drone (with battery) or null.
+ */
+function reserveDrone(hiveId) {
+  const hive = hives.get(hiveId);
+  if (!hive) return null;
+  const candidates = hive.drones
+    .filter((d) => d.status === 'idle' && d.battery >= MIN_DEPLOY_BATTERY)
+    .sort((a, b) => b.battery - a.battery);
+  if (!candidates.length) return null;
+  const chosen = candidates[0];
+  chosen.status = 'flying';
+  hive.updatedAt = Date.now();
+  return { hive: snapshot(hive), drone: { ...chosen } };
 }
 
 /**
- * Increment activeDrones by 1 if there is availability.
- * Returns the updated hive or null if at capacity / not found.
+ * Drone returned to base. Mark it 'charging' with whatever
+ * battery it landed with so the charging tick takes it the
+ * rest of the way back to 100.
  */
-function reserveDrone(id) {
-  const h = hives.get(id);
-  if (!h) return null;
-  if (h.activeDrones >= h.capacity) return null;
-  h.activeDrones += 1;
-  h.updatedAt = Date.now();
-  return h;
-}
-
-function releaseDrone(id) {
-  const h = hives.get(id);
-  if (!h) return null;
-  h.activeDrones = Math.max(0, h.activeDrones - 1);
-  h.updatedAt = Date.now();
-  return h;
-}
-
-function isAvailable(h) {
-  return h && h.activeDrones < h.capacity;
+function releaseDrone(hiveId, droneId, finalBattery = 0) {
+  const hive = hives.get(hiveId);
+  if (!hive) return null;
+  const drone = hive.drones.find((d) => d.id === droneId);
+  if (!drone) return null;
+  drone.battery = Math.max(0, Math.min(100, finalBattery));
+  drone.status = drone.battery >= 100 ? 'idle' : 'charging';
+  hive.updatedAt = Date.now();
+  return snapshot(hive);
 }
 
 /**
- * Nearest hive to a coord, regardless of availability.
- * Returns { hive, distanceMeters } or null.
+ * Walk every hive, advance charging drones, flip to idle when
+ * full. Returns the set of hive IDs that changed.
  */
+function tickCharging(dtSec = 1) {
+  const changed = new Set();
+  for (const hive of hives.values()) {
+    for (const drone of hive.drones) {
+      if (drone.status !== 'charging') continue;
+      drone.battery = Math.min(100, drone.battery + CHARGE_RATE_PER_SEC * dtSec);
+      if (drone.battery >= 100) {
+        drone.battery = 100;
+        drone.status = 'idle';
+      }
+      changed.add(hive.id);
+    }
+    if (changed.has(hive.id)) hive.updatedAt = Date.now();
+  }
+  return changed;
+}
+
+// ── Spatial helpers ─────────────────────────────────────
+
 function nearestHive(coord) {
   if (!coord || !hives.size) return null;
   let best = null;
   for (const hive of hives.values()) {
     const d = haversineDistanceMeters(coord, hive);
-    if (!best || d < best.distanceMeters) best = { hive, distanceMeters: d };
+    if (!best || d < best.distanceMeters) best = { hive: snapshot(hive), distanceMeters: d };
+  }
+  return best;
+}
+
+function nearestAvailableHive(coord) {
+  if (!coord || !hives.size) return null;
+  let best = null;
+  for (const hive of hives.values()) {
+    if (computeAvailable(hive) === 0) continue;
+    const d = haversineDistanceMeters(coord, hive);
+    if (!best || d < best.distanceMeters) best = { hive: snapshot(hive), distanceMeters: d };
   }
   return best;
 }
 
 /**
- * Nearest hive to a coord that has at least one available drone.
- * Returns { hive, distanceMeters } or null.
+ * Estimate seconds until the soonest drone at this hive is
+ * ready (lowest battery charging + time-to-full).
  */
-function nearestAvailableHive(coord) {
-  if (!coord || !hives.size) return null;
-  let best = null;
-  for (const hive of hives.values()) {
-    if (!isAvailable(hive)) continue;
-    const d = haversineDistanceMeters(coord, hive);
-    if (!best || d < best.distanceMeters) best = { hive, distanceMeters: d };
-  }
-  return best;
+function secondsUntilNextAvailable(hiveId) {
+  const hive = hives.get(hiveId);
+  if (!hive) return null;
+  const charging = hive.drones.filter((d) => d.status === 'charging');
+  if (!charging.length) return null;
+  const nearest = charging.sort((a, b) => b.battery - a.battery)[0];
+  return Math.ceil((100 - nearest.battery) / CHARGE_RATE_PER_SEC);
 }
 
 module.exports = {
@@ -131,8 +201,11 @@ module.exports = {
   listHives,
   reserveDrone,
   releaseDrone,
-  isAvailable,
+  tickCharging,
   nearestHive,
   nearestAvailableHive,
+  secondsUntilNextAvailable,
   MERGE_RADIUS_METERS,
+  MIN_DEPLOY_BATTERY,
+  CHARGE_RATE_PER_SEC,
 };
