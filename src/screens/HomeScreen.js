@@ -279,6 +279,8 @@ function HomeMapContent({ navigation }) {
               : DEFAULT_REGION
           }
           mapType="mutedStandard"
+          showsUserLocation
+          showsMyLocationButton
           showsCompass
           showsScale
           scrollEnabled
