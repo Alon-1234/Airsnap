@@ -5,28 +5,33 @@
  *  Final step before the drone is dispatched.
  *
  *  Shows:
- *    • Order summary (location, package, price)
- *    • Payment method selector (Apple Pay, Google Pay, etc.)
+ *    • Order summary (location, package, price in NIS)
+ *    • Optional promo / discount code field
+ *    • Credit balance + payment breakdown
+ *        Subtotal − Credits applied = Card charge
+ *    • Payment method selector
  *    • "Place Order" CTA
  *
- *  On confirmation the user is navigated to FlightTracking
- *  where they watch the drone approach in real-time.
- *
- *  Route params received:
- *    • locationType, latitude, longitude, siteName
- *    • package  (the selected PACKAGES object)
+ *  Flow:
+ *    1. createOrder() returns { creditsApplied, cardCharge, paymentStatus }
+ *    2. If paymentStatus==='paid' (admin OR fully covered) → straight to FlightTracking.
+ *    3. Otherwise the card-charge stage is currently a stop-gap
+ *       confirmPayment() call — real Meshulam SDK will replace it.
  * ============================================================
  */
 
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { ScreenWrapper, Card, GradientButton } from '../components/common';
-import { useTheme } from '../context';
+import { useTheme, useAuth } from '../context';
 import { Typography, Spacing } from '../theme';
 import { PAYMENT_METHODS } from '../constants';
 import { simApi } from '../services/SimClient';
+
+const TAX_RATE = 0.08;
+const fmt = (n) => `₪${Number(n || 0).toFixed(2)}`;
 
 export default function PaymentScreen({ navigation, route }) {
   const {
@@ -37,41 +42,90 @@ export default function PaymentScreen({ navigation, route }) {
     package: selectedPkg,
   } = route.params;
 
+  const { colors } = useTheme();
+  const { me, refreshMe } = useAuth();
+  const styles = dynamicStyles(colors);
+
   const [paymentId, setPaymentId] = useState('apple_pay');
   const [placing, setPlacing] = useState(false);
+  // Local-only — server validates + redeems atomically in POST /orders.
+  const [discountCode, setDiscountCode] = useState('');
 
-  const tax = selectedPkg.price * 0.08;
-  const total = selectedPkg.price + tax;
-
-  const { colors } = useTheme();
-  const styles = dynamicStyles(colors);
+  const subtotal = Number(selectedPkg.price || 0);
+  const tax = +(subtotal * TAX_RATE).toFixed(2);
+  const grossTotal = +(subtotal + tax).toFixed(2);
+  // Preview shown without discount — the actual discount materializes
+  // in the server response. Avoids client/server divergence.
+  const preview = computePreview({
+    grossTotal,
+    discountAmount: 0,
+    creditBalance: me?.isAdmin ? Infinity : Number(me?.credits || 0),
+    isAdmin: !!me?.isAdmin,
+  });
 
   const handlePlaceOrder = async () => {
     if (placing) return;
     setPlacing(true);
     try {
-      const { orderId, hive } = await simApi.createOrder({
+      const orderRes = await simApi.createOrder({
         targetLat: latitude,
         targetLng: longitude,
         siteName,
-        package: selectedPkg,
+        package: { ...selectedPkg, price: grossTotal },
         paymentMethod: paymentId,
+        discountCode: discountCode.trim() || undefined,
       });
-      navigation.navigate('FlightTracking', {
-        latitude,
-        longitude,
-        siteName,
-        package: selectedPkg,
-        paymentMethod: paymentId,
-        orderId,
-        hive,
-      });
+      // Server is the authority on what got charged.
+      const { orderId, hive, paymentStatus, cardCharge, creditsApplied, adminFree } = orderRes;
+
+      // Refresh the user's balance so it reflects the deduction.
+      refreshMe();
+
+      if (paymentStatus === 'paid' || adminFree) {
+        navigation.navigate('FlightTracking', {
+          latitude, longitude, siteName,
+          package: selectedPkg, paymentMethod: paymentId,
+          orderId, hive,
+        });
+        return;
+      }
+
+      // Stop-gap until Meshulam: confirm the card charge cleared.
+      // Real flow would launch the Meshulam SDK here, then call confirmPayment()
+      // (or rely on the /payments/webhook flip).
+      Alert.alert(
+        'Confirm payment',
+        `Card charge: ${fmt(cardCharge)}. Tap "Pay" to simulate a successful Meshulam capture.`,
+        [
+          { text: 'Cancel', style: 'cancel', onPress: () => setPlacing(false) },
+          {
+            text: 'Pay',
+            onPress: async () => {
+              try {
+                await simApi.confirmPayment(orderId);
+                refreshMe();
+                navigation.navigate('FlightTracking', {
+                  latitude, longitude, siteName,
+                  package: selectedPkg, paymentMethod: paymentId,
+                  orderId, hive,
+                });
+              } catch (err) {
+                Alert.alert('Payment failed', err.message || 'Unknown error');
+              } finally {
+                setPlacing(false);
+              }
+            },
+          },
+        ],
+        { cancelable: false },
+      );
+      return;
     } catch (err) {
       Alert.alert('Could not place order', err.message || 'Unknown error');
-    } finally {
       setPlacing(false);
     }
   };
+
 
   return (
     <ScreenWrapper
@@ -79,6 +133,7 @@ export default function PaymentScreen({ navigation, route }) {
       onBack={() => navigation.goBack()}
       scroll
     >
+      {/* ─── Order summary ──────────────────────────────────── */}
       <Card style={styles.summaryCard}>
         <Text style={[Typography.label, styles.sectionLabel, { color: colors.textSecondary }]}>Order Summary</Text>
 
@@ -100,20 +155,79 @@ export default function PaymentScreen({ navigation, route }) {
 
         <View style={styles.priceRow}>
           <Text style={[Typography.bodySmall, { color: colors.textSecondary }]}>Package</Text>
-          <Text style={[Typography.bodySemibold, { color: colors.textPrimary }]}>${selectedPkg.price.toFixed(2)}</Text>
+          <Text style={[Typography.bodySemibold, { color: colors.textPrimary }]}>{fmt(subtotal)}</Text>
         </View>
         <View style={styles.priceRow}>
           <Text style={[Typography.bodySmall, { color: colors.textSecondary }]}>Tax (8%)</Text>
-          <Text style={[Typography.bodySemibold, { color: colors.textPrimary }]}>${tax.toFixed(2)}</Text>
+          <Text style={[Typography.bodySemibold, { color: colors.textPrimary }]}>{fmt(tax)}</Text>
         </View>
+        {discountCode.trim() && (
+          <View style={styles.priceRow}>
+            <Text style={[Typography.bodySmall, { color: colors.success }]}>
+              Promo {discountCode.trim().toUpperCase()}
+            </Text>
+            <Text style={[Typography.bodySemibold, { color: colors.success }]}>
+              applied at checkout
+            </Text>
+          </View>
+        )}
         <View style={[styles.priceRow, styles.totalRow]}>
           <Text style={[Typography.h4, { color: colors.textPrimary }]}>Total</Text>
           <Text style={[Typography.h3, { color: colors.accent }]}>
-            ${total.toFixed(2)}
+            {fmt(preview.totalAfterDiscount)}
+          </Text>
+        </View>
+
+        {/* Credit breakdown */}
+        <View style={[styles.priceRow, { marginTop: Spacing.sm }]}>
+          <Text style={[Typography.bodySmall, { color: colors.textSecondary }]}>
+            {me?.isAdmin ? 'Admin balance' : 'Credit balance'}
+          </Text>
+          <Text style={[Typography.bodySemibold, { color: colors.textPrimary }]}>
+            {me?.isAdmin ? 'Unlimited' : fmt(me?.credits || 0)}
+          </Text>
+        </View>
+        {!me?.isAdmin && preview.creditsApplied > 0 && (
+          <View style={styles.priceRow}>
+            <Text style={[Typography.bodySmall, { color: colors.success }]}>Credits applied</Text>
+            <Text style={[Typography.bodySemibold, { color: colors.success }]}>
+              −{fmt(preview.creditsApplied)}
+            </Text>
+          </View>
+        )}
+        <View style={[styles.priceRow, styles.totalRow]}>
+          <Text style={[Typography.h4, { color: colors.textPrimary }]}>
+            {me?.isAdmin ? 'Charge' : 'Card charge'}
+          </Text>
+          <Text style={[Typography.h3, { color: me?.isAdmin ? colors.success : colors.textPrimary }]}>
+            {me?.isAdmin ? 'Free' : fmt(preview.cardCharge)}
           </Text>
         </View>
       </Card>
 
+      {/* ─── Discount / promo code ─────────────────────────── */}
+      <Text style={[Typography.label, styles.sectionLabel, { color: colors.textSecondary }]}>
+        Promo Code (optional)
+      </Text>
+      <Card style={styles.promoCard}>
+        <TextInput
+          style={[
+            styles.promoInput,
+            { color: colors.textPrimary, backgroundColor: colors.bgInput, borderColor: colors.border, marginRight: 0 },
+          ]}
+          value={discountCode}
+          onChangeText={(t) => setDiscountCode(t.toUpperCase())}
+          placeholder="Enter discount code (validated at checkout)"
+          placeholderTextColor={colors.textMuted}
+          autoCapitalize="characters"
+          maxLength={32}
+        />
+        <Text style={[Typography.caption, { color: colors.textMuted, marginTop: Spacing.sm }]}>
+          Balance-type codes go in the Credits screen. Discount codes apply here.
+        </Text>
+      </Card>
+
+      {/* ─── Payment method ─────────────────────────────────── */}
       <Text style={[Typography.label, styles.sectionLabel, { color: colors.textSecondary }]}>Payment Method</Text>
 
       {PAYMENT_METHODS.map((pm) => {
@@ -156,7 +270,12 @@ export default function PaymentScreen({ navigation, route }) {
       })}
 
       <GradientButton
-        title={placing ? 'Dispatching drone…' : `Place Order — $${total.toFixed(2)}`}
+        title={
+          placing ? 'Placing order…'
+          : me?.isAdmin ? 'Place Order — Free (admin)'
+          : preview.cardCharge === 0 ? 'Place Order — Free (credits)'
+          : `Place Order — ${fmt(preview.cardCharge)}`
+        }
         icon={placing ? null : 'lock-closed'}
         onPress={handlePlaceOrder}
         disabled={placing}
@@ -168,6 +287,17 @@ export default function PaymentScreen({ navigation, route }) {
       </Text>
     </ScreenWrapper>
   );
+}
+
+function computePreview({ grossTotal, discountAmount, creditBalance, isAdmin }) {
+  const totalAfterDiscount = Math.max(0, +(grossTotal - discountAmount).toFixed(2));
+  if (isAdmin) {
+    return { totalAfterDiscount, creditsApplied: 0, cardCharge: 0 };
+  }
+  const credits = Math.min(creditBalance, totalAfterDiscount);
+  const creditsApplied = Math.max(0, +credits.toFixed(2));
+  const cardCharge = +(totalAfterDiscount - creditsApplied).toFixed(2);
+  return { totalAfterDiscount, creditsApplied, cardCharge };
 }
 
 // ── Styles ────────────────────────────────────────────────
@@ -203,6 +333,29 @@ const dynamicStyles = (colors) => StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.divider,
   },
+
+  promoCard: { marginBottom: Spacing.lg },
+  promoRow: { flexDirection: 'row', alignItems: 'center' },
+  promoInput: {
+    flex: 1,
+    height: 44,
+    borderWidth: 1,
+    borderRadius: Spacing.radiusMd,
+    paddingHorizontal: Spacing.md,
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: 1,
+    marginRight: Spacing.sm,
+  },
+  applyBtn: {
+    paddingHorizontal: Spacing.md,
+    height: 44,
+    borderRadius: Spacing.radiusMd,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  applyBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  discountActiveRow: { flexDirection: 'row', alignItems: 'center' },
 
   pmCard: {
     marginBottom: Spacing.sm,

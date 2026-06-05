@@ -15,7 +15,7 @@
  * ============================================================
  */
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp, getApps } from 'firebase/app';
@@ -37,10 +37,12 @@ import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 
 import { FIREBASE_CONFIG, GOOGLE_WEB_CLIENT_ID } from '../config/firebaseConfig';
+import { simApi } from '../services/SimClient';
 
 WebBrowser.maybeCompleteAuthSession();
 
 const TERMS_KEY = '@airsnap_terms_accepted';
+const ME_CACHE_KEY = '@airsnap_me';
 
 // ── Initialize Firebase once ─────────────────────────────
 const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
@@ -95,6 +97,44 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false);
+  const [me, setMe] = useState(null);
+  // Stashed by SignUpScreen before sign-up completes — consumed by bootstrap.
+  const pendingReferralCodeRef = useRef(null);
+  const setPendingReferralCode = useCallback((code) => {
+    pendingReferralCodeRef.current = code ? String(code).trim().toUpperCase() : null;
+  }, []);
+
+  const bootstrap = useCallback(async () => {
+    try {
+      const body = pendingReferralCodeRef.current
+        ? { referralCode: pendingReferralCodeRef.current }
+        : {};
+      const res = await simApi.bootstrapMe(body);
+      pendingReferralCodeRef.current = null;
+      if (res?.user) {
+        setMe(res.user);
+        try { await AsyncStorage.setItem(ME_CACHE_KEY, JSON.stringify(res.user)); } catch (_) {}
+      }
+      return res?.user || null;
+    } catch (err) {
+      console.log('[Auth] bootstrapMe failed:', err.message);
+      return null;
+    }
+  }, []);
+
+  const refreshMe = useCallback(async () => {
+    try {
+      const res = await simApi.getMe();
+      if (res?.user) {
+        setMe(res.user);
+        try { await AsyncStorage.setItem(ME_CACHE_KEY, JSON.stringify(res.user)); } catch (_) {}
+      }
+      return res?.user || null;
+    } catch (err) {
+      console.log('[Auth] refreshMe failed:', err.message);
+      return null;
+    }
+  }, []);
 
   // ── Google OAuth (expo-auth-session) ───────────────────
   const [googleRequest, googleResponse, promptGoogle] = Google.useAuthRequest({
@@ -112,16 +152,29 @@ export function AuthProvider({ children }) {
       .then((v) => { if (v === 'true') setHasAcceptedTerms(true); })
       .catch((err) => console.log('Terms recovery error:', err));
 
+    // Load cached `me` immediately so CreditsScreen has data offline.
+    AsyncStorage.getItem(ME_CACHE_KEY)
+      .then((v) => { if (v) try { setMe(JSON.parse(v)); } catch (_) {} })
+      .catch(() => {});
+
     const unsub = onAuthStateChanged(firebaseAuth, (fbUser) => {
-      setUser(mapFirebaseUser(fbUser));
+      const mapped = mapFirebaseUser(fbUser);
+      setUser(mapped);
       if (firstCallback) {
         setIsLoading(false);
         firstCallback = false;
       }
+      // Bootstrap on every sign-in (idempotent).
+      if (mapped) {
+        bootstrap();
+      } else {
+        setMe(null);
+        AsyncStorage.removeItem(ME_CACHE_KEY).catch(() => {});
+      }
     });
 
     return unsub;
-  }, []);
+  }, [bootstrap]);
 
   // ── Handle Google sign-in callback ──────────────────────
   useEffect(() => {
@@ -242,6 +295,9 @@ export function AuthProvider({ children }) {
         resendVerificationEmail,
         reloadUser,
         acceptTerms,
+        me,
+        refreshMe,
+        setPendingReferralCode,
       }}
     >
       {children}

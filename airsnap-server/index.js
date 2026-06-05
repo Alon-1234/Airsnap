@@ -12,12 +12,27 @@
  *    POST /orders                       — authed, reserve drone + sim
  *    GET  /orders                       — authed, list this user's orders
  *    GET  /orders/:id                   — authed, fetch one order
+ *    POST /orders/:id/confirm-payment   — authed, stop-gap "card cleared"
  *    POST /spatial/validate-geofence    — open, distance to nearest hive
+ *
+ *    Users & credits:
+ *    POST /users/me                     — authed, idempotent bootstrap
+ *    GET  /users/me                     — authed, returns user + isAdmin
+ *    GET  /users/me/ledger              — authed, last 20 credit moves
+ *
+ *    Promo codes:
+ *    POST /promos/redeem                — authed, balance OR discount
+ *    POST /admin/promos                 — admin+pass, create
+ *    GET  /admin/promos                 — admin+pass, list
+ *    DELETE /admin/promos/:code         — admin+pass, deactivate
+ *
+ *    Future:
+ *    POST /payments/webhook             — Meshulam will call this (TODO)
  *
  *  Socket events (server -> client)
  *    drone:state, order:status, session:progress,
  *    hive:created, hive:updated, hive:deleted, hives:snapshot,
- *    order:delivered, user:location
+ *    order:delivered, order:paid, user:location
  *
  *  Socket events (client -> server)
  *    order:join, user:location, session:start, session:end,
@@ -32,11 +47,20 @@ const cors = require('cors');
 const express = require('express');
 const { Server: SocketIOServer } = require('socket.io');
 
-const { requireAuth, requireAdmin, initFirebase } = require('./auth');
+const {
+  requireAuth,
+  requireAdmin,
+  requireAdminPass,
+  initFirebase,
+  isAdminEmail,
+} = require('./auth');
 const hiveStore = require('./hiveStore');
 const orderStore = require('./orderStore');
+const userStore = require('./userStore');
+const promoStore = require('./promoStore');
 const { Drone, STATUS } = require('./droneSim');
 const { pickMedia } = require('./samples');
+const { splitPayment, round2 } = require('./credits');
 
 const PORT = Number(process.env.PORT) || 4000;
 const DELIVERY_ZONE_RADIUS_METERS = 500;
@@ -118,13 +142,127 @@ app.post('/spatial/validate-geofence', (req, res) => {
   });
 });
 
-app.post('/orders', requireAuth, (req, res) => {
-  const { targetLat, targetLng, siteName, package: pkg, paymentMethod } = req.body || {};
+// ── Users & credits ──────────────────────────────────────
+
+/**
+ * Idempotent bootstrap. Called on every app start with the user's
+ * optional referral code (only honored on first creation).
+ */
+app.post('/users/me', requireAuth, async (req, res) => {
+  try {
+    const referralCodeUsedAtSignup = req.body?.referralCode;
+    const displayName = req.body?.displayName;
+    const u = await userStore.getOrCreateUser(
+      req.user.uid,
+      req.user.email,
+      displayName,
+      { referralCodeUsedAtSignup },
+    );
+    res.json({
+      user: serializeUser(u, req.user),
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/users/me', requireAuth, async (req, res) => {
+  try {
+    const u = await userStore.getUser(req.user.uid);
+    if (!u) return res.status(404).json({ error: 'User not found — call POST /users/me to bootstrap' });
+    res.json({ user: serializeUser(u, req.user) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/users/me/ledger', requireAuth, async (req, res) => {
+  try {
+    const entries = await userStore.getLedger(req.user.uid, 20);
+    res.json({ entries });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+function serializeUser(u, authUser) {
+  return {
+    uid: u.uid,
+    email: u.email,
+    displayName: u.displayName,
+    credits: u.credits || 0,
+    referralCode: u.referralCode,
+    referredBy: u.referredBy || null,
+    hasMadeFirstOrder: !!u.hasMadeFirstOrder,
+    signupBonusGranted: !!u.signupBonusGranted,
+    isAdmin: !!(authUser && authUser.isAdmin),
+  };
+}
+
+// ── Promo codes ──────────────────────────────────────────
+
+/**
+ * User-facing redeem. For 'balance' codes the credit is applied immediately.
+ * For 'discount' codes, the client must place an order with discountCode set
+ * within a short window — this endpoint is informational only.
+ */
+app.post('/promos/redeem', requireAuth, async (req, res) => {
+  const code = String(req.body?.code || '').trim().toUpperCase();
+  if (!code) return res.status(400).json({ error: 'code required' });
+  try {
+    const result = await promoStore.redeemPromo(code, req.user.uid);
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/admin/promos', requireAdminPass, async (req, res) => {
+  try {
+    const promo = await promoStore.createPromo(req.body || {}, req.user.uid);
+    res.status(201).json({ promo });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/admin/promos', requireAdminPass, async (req, res) => {
+  try {
+    const promos = await promoStore.listPromos();
+    res.json({ promos });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/admin/promos/:code', requireAdminPass, async (req, res) => {
+  try {
+    const result = await promoStore.deactivatePromo(req.params.code);
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// ── Orders ───────────────────────────────────────────────
+
+app.post('/orders', requireAuth, async (req, res) => {
+  const {
+    targetLat,
+    targetLng,
+    siteName,
+    package: pkg,
+    paymentMethod,
+    discountCode,
+  } = req.body || {};
   if (typeof targetLat !== 'number' || typeof targetLng !== 'number') {
     return res.status(400).json({ error: 'targetLat and targetLng required' });
   }
   if (!pkg || typeof pkg.durationSec !== 'number') {
     return res.status(400).json({ error: 'package.durationSec required' });
+  }
+  if (typeof pkg.price !== 'number' || pkg.price < 0) {
+    return res.status(400).json({ error: 'package.price required' });
   }
 
   const target = { latitude: targetLat, longitude: targetLng };
@@ -154,22 +292,112 @@ app.post('/orders', requireAuth, (req, res) => {
     });
   }
 
+  // Bootstrap-on-demand so we never charge a user who somehow skipped /users/me.
+  let me;
+  try {
+    me = await userStore.getOrCreateUser(req.user.uid, req.user.email, null);
+  } catch (e) {
+    return res.status(500).json({ error: `User init failed: ${e.message}` });
+  }
+
+  // Pre-allocate an order ID so the promo redemption can reference it
+  // and so we can write the order doc in the same logical step.
+  const orderId = orderStore.genOrderId();
+
+  // Apply discount code if provided. Discounts are written to the
+  // user's redemption record now — partial-flow rollback is acceptable
+  // because the user is committing to this order.
+  let promoDiscount = 0;
+  let promoCode = null;
+  if (discountCode) {
+    try {
+      const result = await promoStore.redeemPromo(
+        String(discountCode).trim().toUpperCase(),
+        req.user.uid,
+        { orderId },
+      );
+      if (result.type === 'discount') {
+        promoDiscount = result.amount;
+        promoCode = result.code;
+      } else {
+        return res.status(400).json({
+          error: `Code ${result.code} is a balance code — redeem it from the Credits screen, not at checkout.`,
+        });
+      }
+    } catch (e) {
+      return res.status(400).json({ error: `Promo failed: ${e.message}` });
+    }
+  }
+
+  const subtotal = Math.max(0, round2(pkg.price - promoDiscount));
+  const split = splitPayment(subtotal, me.credits || 0, !!req.user.isAdmin);
+
+  // Spend credits BEFORE reserving the drone so a failure here doesn't
+  // leave a drone in flight unpaid.
+  if (split.creditsApplied > 0) {
+    try {
+      await userStore.spendOnOrder(req.user.uid, split.creditsApplied, orderId);
+    } catch (e) {
+      return res.status(400).json({ error: `Credit deduction failed: ${e.message}` });
+    }
+  }
+
   const reservation = hiveStore.reserveDrone(candidate.hive.id);
   if (!reservation) {
+    // Refund the credits we just spent so we don't strand the user.
+    if (split.creditsApplied > 0) {
+      try {
+        await userStore.adminAdjust(
+          req.user.uid,
+          split.creditsApplied,
+          `Refund — drone unavailable for order ${orderId}`,
+          'system',
+        );
+      } catch (_) { /* best-effort */ }
+    }
     return res.status(409).json({ error: 'That hive just filled up — try again.' });
   }
   io.emit('hive:updated', reservation.hive);
 
+  const paymentStatus = split.cardCharge > 0 ? 'awaiting_card' : 'paid';
+
   const order = orderStore.createOrder({
+    id: orderId,
     userId: req.user.uid,
     userEmail: req.user.email,
-    targetLat, targetLng, siteName,
-    pkg, paymentMethod,
+    targetLat,
+    targetLng,
+    siteName,
+    pkg,
+    paymentMethod,
     hive: reservation.hive,
     droneId: reservation.drone.id,
+    paymentStatus,
+    creditsApplied: split.creditsApplied,
+    cardCharge: split.cardCharge,
+    promoCode,
+    promoDiscount,
   });
   startDroneForOrder(order, reservation.drone.battery);
-  res.status(201).json({ orderId: order.id, hive: reservation.hive, drone: reservation.drone });
+
+  // Fully-paid orders (admin OR full credits OR free) trigger referral immediately.
+  if (paymentStatus === 'paid') {
+    onPaymentSucceeded(order.id).catch((e) =>
+      console.warn('[payments] onPaymentSucceeded failed:', e.message),
+    );
+  }
+
+  res.status(201).json({
+    orderId: order.id,
+    hive: reservation.hive,
+    drone: reservation.drone,
+    paymentStatus,
+    creditsApplied: split.creditsApplied,
+    cardCharge: split.cardCharge,
+    promoDiscount,
+    promoCode,
+    adminFree: split.adminFree,
+  });
 });
 
 app.get('/orders', requireAuth, (req, res) => {
@@ -183,6 +411,50 @@ app.get('/orders/:id', requireAuth, (req, res) => {
   if (order.userId !== req.user.uid) return res.status(403).json({ error: 'Not your order' });
   const drone = drones.get(order.id);
   res.json({ order, drone: drone ? drone.snapshot() : null });
+});
+
+/**
+ * Stop-gap until Meshulam is wired. The mobile app calls this after
+ * the user completes the (placeholder) payment screen. Owner-only.
+ *
+ * TODO: remove once /payments/webhook is verifying real Meshulam
+ * signatures and the mobile app launches their SDK directly.
+ */
+app.post('/orders/:id/confirm-payment', requireAuth, async (req, res) => {
+  const order = orderStore.getOrder(req.params.id);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  if (order.userId !== req.user.uid) return res.status(403).json({ error: 'Not your order' });
+  if (order.paymentStatus === 'paid') {
+    return res.json({ ok: true, alreadyPaid: true, order });
+  }
+  orderStore.setPaymentStatus(order.id, 'paid');
+  try {
+    await onPaymentSucceeded(order.id);
+  } catch (e) {
+    console.warn('[payments] onPaymentSucceeded (confirm) failed:', e.message);
+  }
+  io.to(`order:${order.id}`).emit('order:paid', { orderId: order.id });
+  res.json({ ok: true, order: orderStore.getOrder(order.id) });
+});
+
+/**
+ * Meshulam will POST here when a card charge clears. Scaffolded — not
+ * yet wired. Verify signature when the integration lands.
+ */
+app.post('/payments/webhook', async (req, res) => {
+  // TODO: verify Meshulam HMAC using process.env.MESHULAM_WEBHOOK_SECRET.
+  const { orderId, status } = req.body || {};
+  if (!orderId) return res.status(400).json({ error: 'orderId required' });
+  const order = orderStore.getOrder(orderId);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  if (status === 'paid') {
+    orderStore.setPaymentStatus(orderId, 'paid');
+    await onPaymentSucceeded(orderId);
+    io.to(`order:${orderId}`).emit('order:paid', { orderId });
+  } else if (status === 'failed') {
+    orderStore.setPaymentStatus(orderId, 'failed');
+  }
+  res.json({ ok: true });
 });
 
 // Fallback to web viz.
@@ -235,7 +507,6 @@ function startDroneForOrder(order, startBattery) {
   const watcher = setInterval(() => {
     if (drone.status === STATUS.DELIVERED) {
       clearInterval(watcher);
-      // Pick the media that "the drone shot" and stamp it on the order.
       const media = pickMedia(order.package);
       orderStore.markDelivered(order.id, media);
       const deliveredPayload = { orderId: order.id, media, deliveredAt: Date.now() };
@@ -245,6 +516,26 @@ function startDroneForOrder(order, startBattery) {
       setTimeout(() => drones.delete(order.id), 30000);
     }
   }, 1000);
+}
+
+/**
+ * Called whenever an order's paymentStatus transitions to 'paid'.
+ * Idempotent — safe to call repeatedly; only the first call fires the
+ * referral bonus.
+ */
+async function onPaymentSucceeded(orderId) {
+  const order = orderStore.getOrder(orderId);
+  if (!order) return;
+  try {
+    const result = await userStore.markFirstOrderAndPayReferrer(order.userId);
+    if (result?.referrerCredited) {
+      console.log(
+        `[referral] order ${orderId} triggered referral bonus to ${result.referrerUid}`,
+      );
+    }
+  } catch (e) {
+    console.warn(`[payments] referral check failed for ${orderId}:`, e.message);
+  }
 }
 
 // ── Charging tick — 1 Hz, broadcasts updated hives ───────

@@ -41,3 +41,10 @@ export const GOOGLE_WEB_CLIENT_ID =
 export const ADMIN_EMAILS = [
   'akonk13579@gmail.com',
 ];
+
+// ── Admin promo passcode (UX gate) ──────────────────────
+// Required to unlock the Promo Codes admin screen. The SERVER
+// enforces this against ADMIN_PROMO_PASS env var via the
+// X-Admin-Pass header — this constant is the UX shortcut so a
+// stolen device can't browse the screen idly.
+export const ADMIN_PROMO_PASS = 'Alon132';

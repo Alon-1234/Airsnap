@@ -45,6 +45,8 @@ import OrderHistoryScreen from '../screens/OrderHistoryScreen';
 import HelpScreen from '../screens/HelpScreen';
 import PrivacyTermsScreen from '../screens/PrivacyTermsScreen';
 import HiveAdminScreen from '../screens/HiveAdminScreen';
+import CreditsScreen from '../screens/CreditsScreen';
+import PromoCodeAdminScreen from '../screens/PromoCodeAdminScreen';
 
 // ── Auth & onboarding screens ─────────────────────────────
 import LoginScreen from '../screens/LoginScreen';
@@ -122,6 +124,8 @@ function ProfileStackNavigator() {
       <ProfileStack.Screen name="HelpFromProfile" component={HelpScreen} />
       <ProfileStack.Screen name="PrivacyTerms" component={PrivacyTermsScreen} />
       <ProfileStack.Screen name="HiveAdmin" component={HiveAdminScreen} />
+      <ProfileStack.Screen name="Credits" component={CreditsScreen} />
+      <ProfileStack.Screen name="PromoCodeAdmin" component={PromoCodeAdminScreen} />
     </ProfileStack.Navigator>
   );
 }

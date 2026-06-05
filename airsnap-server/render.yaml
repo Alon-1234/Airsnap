@@ -19,3 +19,20 @@ services:
         value: airsnap-7844f
       - key: NODE_VERSION
         value: 20
+      # ─── Credits / referrals / promo codes ─────────────────
+      # Set in the Render dashboard ("sync: false" = secret managed there):
+      #   FIREBASE_SERVICE_ACCOUNT — base64 of the service account JSON,
+      #                              required for Firestore writes (credits,
+      #                              referrals, promo codes).
+      #   ADMIN_PROMO_PASS         — passcode required by X-Admin-Pass header
+      #                              on /admin/promos/*. Default: Alon132
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+      - key: ADMIN_PROMO_PASS
+        sync: false
+      - key: SIGNUP_BONUS_NIS
+        value: "5"
+      - key: SIGNUP_BONUS_EXPIRES
+        value: "2026-06-30T23:59:59Z"
+      - key: REFERRAL_BONUS_NIS
+        value: "20"

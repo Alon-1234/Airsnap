@@ -38,7 +38,7 @@ import { useAuth, useTheme } from '../context';
 import { Spacing } from '../theme';
 
 export default function SignUpScreen({ navigation }) {
-  const { signUp, signInWithGoogle, signInWithApple } = useAuth();
+  const { signUp, signInWithGoogle, signInWithApple, setPendingReferralCode } = useAuth();
   const { colors } = useTheme();
 
   // ── Local form state ──────────────────────────────────
@@ -46,6 +46,7 @@ export default function SignUpScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -79,6 +80,9 @@ export default function SignUpScreen({ navigation }) {
 
     setLoading(true);
     try {
+      // Stash referral code BEFORE sign-up so AuthContext's bootstrap
+      // picks it up the moment Firebase fires onAuthStateChanged.
+      setPendingReferralCode(referralCode);
       await signUp(name.trim(), email.trim(), password);
       // After sign-up, the navigator will automatically show
       // EmailVerificationScreen because user.emailVerified is false.
@@ -220,6 +224,20 @@ export default function SignUpScreen({ navigation }) {
             onChangeText={setConfirmPw}
             secureTextEntry={!showPassword}
             textContentType="newPassword"
+          />
+        </View>
+
+        {/* ─── Referral code (optional) ───────────────────── */}
+        <View style={ds.inputWrapper}>
+          <Ionicons name="gift-outline" size={20} color={colors.textMuted} style={ds.inputIcon} />
+          <TextInput
+            style={ds.input}
+            placeholder="Referral code (optional)"
+            placeholderTextColor={colors.textMuted}
+            value={referralCode}
+            onChangeText={(t) => setReferralCode(t.toUpperCase())}
+            autoCapitalize="characters"
+            maxLength={12}
           />
         </View>
 

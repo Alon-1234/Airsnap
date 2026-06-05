@@ -173,6 +173,12 @@ export default function ProfileScreen({ navigation }) {
       {activeTab === 'account' ? (
         <Card style={ds.menuCard}>
           <MenuItem
+            icon="wallet"
+            label="Credits & Referrals"
+            color={colors.success}
+            onPress={() => navigation.navigate('Credits')}
+          />
+          <MenuItem
             icon="receipt"
             label="Order & Invoice History"
             onPress={() => navigation.navigate('OrderHistory')}
@@ -196,12 +202,20 @@ export default function ProfileScreen({ navigation }) {
             onPress={() => navigation.navigate('PrivacyTerms')}
           />
           {user?.email && ADMIN_EMAILS.includes(user.email.toLowerCase()) && (
-            <MenuItem
-              icon="business"
-              label="Manage Hives (admin)"
-              color={colors.accent}
-              onPress={() => navigation.navigate('HiveAdmin')}
-            />
+            <>
+              <MenuItem
+                icon="business"
+                label="Manage Hives (admin)"
+                color={colors.accent}
+                onPress={() => navigation.navigate('HiveAdmin')}
+              />
+              <MenuItem
+                icon="pricetags"
+                label="Promo Codes (admin)"
+                color={colors.primary}
+                onPress={() => navigation.navigate('PromoCodeAdmin')}
+              />
+            </>
           )}
         </Card>
       ) : (

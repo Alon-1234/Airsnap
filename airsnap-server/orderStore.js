@@ -2,6 +2,14 @@
  * In-memory order store. Orders live for the duration of one
  * flight and stay around so the client can still query final
  * state (and so /orders shows history within this server run).
+ *
+ * Payment fields:
+ *   paymentStatus    'awaiting_card' | 'paid' | 'failed'
+ *   creditsApplied   ₪ deducted from the user's balance
+ *   cardCharge       ₪ to charge the user's card (0 means fully covered)
+ *   paidAt           timestamp when payment cleared
+ *   promoCode        UPPERCASE code applied at order-create time (optional)
+ *   promoDiscount    ₪ subtracted from the package price by that code
  */
 
 const orders = new Map();
@@ -13,10 +21,26 @@ function genOrderId() {
   return `ORD-${stamp}-${String(counter++).padStart(3, '0')}`;
 }
 
-function createOrder({ userId, userEmail, targetLat, targetLng, siteName, pkg, paymentMethod, hive, droneId }) {
-  const id = genOrderId();
+function createOrder({
+  id,
+  userId,
+  userEmail,
+  targetLat,
+  targetLng,
+  siteName,
+  pkg,
+  paymentMethod,
+  hive,
+  droneId,
+  paymentStatus = 'awaiting_card',
+  creditsApplied = 0,
+  cardCharge = 0,
+  promoCode = null,
+  promoDiscount = 0,
+}) {
+  const orderId = id || genOrderId();
   const order = {
-    id,
+    id: orderId,
     userId,
     userEmail,
     targetLat,
@@ -26,11 +50,17 @@ function createOrder({ userId, userEmail, targetLat, targetLng, siteName, pkg, p
     paymentMethod,
     hive,
     droneId,
-    media: null,                // populated when DELIVERED
+    paymentStatus,
+    creditsApplied,
+    cardCharge,
+    promoCode,
+    promoDiscount,
+    paidAt: paymentStatus === 'paid' ? Date.now() : null,
+    media: null,
     deliveredAt: null,
     createdAt: Date.now(),
   };
-  orders.set(id, order);
+  orders.set(orderId, order);
   return order;
 }
 
@@ -38,9 +68,14 @@ function getOrder(id) {
   return orders.get(id) || null;
 }
 
-/**
- * Stamp the order with its delivered media + timestamp.
- */
+function setPaymentStatus(id, status) {
+  const order = orders.get(id);
+  if (!order) return null;
+  order.paymentStatus = status;
+  if (status === 'paid' && !order.paidAt) order.paidAt = Date.now();
+  return order;
+}
+
 function markDelivered(id, media) {
   const order = orders.get(id);
   if (!order) return null;
@@ -66,7 +101,9 @@ function listActiveOrderIds() {
 module.exports = {
   createOrder,
   getOrder,
+  setPaymentStatus,
   markDelivered,
   listOrdersForUser,
   listActiveOrderIds,
+  genOrderId,
 };

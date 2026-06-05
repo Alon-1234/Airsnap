@@ -41,8 +41,8 @@ async function authHeader() {
   }
 }
 
-async function request(method, path, body, { auth = false } = {}) {
-  const headers = { 'Content-Type': 'application/json' };
+async function request(method, path, body, { auth = false, headers: extraHeaders = {} } = {}) {
+  const headers = { 'Content-Type': 'application/json', ...extraHeaders };
   if (auth) Object.assign(headers, await authHeader());
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method,
@@ -71,6 +71,37 @@ export const simApi = {
   getOrder: (id) => request('GET', `/orders/${encodeURIComponent(id)}`, null, { auth: true }),
   listOrders: () => request('GET', '/orders', null, { auth: true }),
   validateGeofence: (coords) => request('POST', '/spatial/validate-geofence', { user: coords }),
+
+  // ── Users & credits ────────────────────────────────────
+  bootstrapMe: (body) => request('POST', '/users/me', body || {}, { auth: true }),
+  getMe: () => request('GET', '/users/me', null, { auth: true }),
+  getLedger: () => request('GET', '/users/me/ledger', null, { auth: true }),
+
+  // ── Promo codes (user-facing) ──────────────────────────
+  redeemPromo: (code) => request('POST', '/promos/redeem', { code }, { auth: true }),
+
+  // ── Payment stop-gap (until Meshulam) ──────────────────
+  confirmPayment: (orderId) =>
+    request('POST', `/orders/${encodeURIComponent(orderId)}/confirm-payment`, null, { auth: true }),
+
+  // ── Admin promo management ─────────────────────────────
+  // adminPass is the X-Admin-Pass header value (passcode entered in the
+  // mobile gate). Server enforces it independently.
+  createPromo: (body, adminPass) =>
+    request('POST', '/admin/promos', body, {
+      auth: true,
+      headers: { 'X-Admin-Pass': adminPass || '' },
+    }),
+  listPromos: (adminPass) =>
+    request('GET', '/admin/promos', null, {
+      auth: true,
+      headers: { 'X-Admin-Pass': adminPass || '' },
+    }),
+  deactivatePromo: (code, adminPass) =>
+    request('DELETE', `/admin/promos/${encodeURIComponent(code)}`, null, {
+      auth: true,
+      headers: { 'X-Admin-Pass': adminPass || '' },
+    }),
 };
 
 // ── Singleton socket client ──────────────────────────────
