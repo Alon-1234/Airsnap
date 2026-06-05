@@ -1,123 +1,130 @@
 # AirSnap
 
-A React Native (Expo) demo app for ordering on-demand drone photography. Users open the app, see whether they're inside a delivery zone, pick a photo package, pay (mock), then watch a simulated drone fly to them, record content, and deliver it back to their gallery.
+On-demand drone photography demo. Users see whether they're inside a delivery zone, pick a photo package, pay, and watch a simulated drone fly to them, record content, and deliver it back to their gallery.
 
-This README covers everything you need to clone, configure, and run the project — including every external service / API key the app talks to.
+Two halves:
+
+- **Mobile app** (Expo / React Native) — UI, auth, ordering, gallery.
+- **Simulation server** ([`airsnap-server/`](airsnap-server/)) — Express + Socket.IO. Realistic drone physics, hive management, payments, credits, referrals, promo codes. Hostable on Render free tier.
+
+➡️ **New here? Read [SETUP.md](SETUP.md) for the full from-scratch install guide.**
+
+---
+
+## Features
+
+### User-facing
+
+- **Email + Google sign-in** (Firebase Auth, JS SDK — runs in Expo Go).
+- **Email verification** required before ordering.
+- **Real-time drone simulation** — watch the drone fly to you on the map; spinning rotors, battery drain, smooth heading.
+- **Hive geofence** — orders only allowed within 500m of a hive; nearest-hive distance + "drones recharging in ~Ns" feedback.
+- **Real photo + video delivery** to Gallery and Order History (AsyncStorage cached for offline).
+- **Pull-to-refresh** + tab-focus auto-refresh everywhere.
+
+### Credits & referrals
+
+- **₪5 signup bonus** (configurable env var, time-windowed).
+- **₪20 referral bonus** — paid to the referrer when their referee makes their first paid order. Server-side CAS guarantees it fires exactly once.
+- **Partial credit payment** — credits cover what they can; card covers the rest. Server is the authority on the split.
+- **Append-only ledger** of every credit movement per user (`users/{uid}/ledger/{id}`).
+- **Promo codes** with two flavors:
+  - `balance` — adds amount to user's balance on redeem (Credits screen)
+  - `discount` — applied to one order at checkout (Payment screen)
+  - Optional expiry, max redemptions, one-time-per-user.
+
+### Admin
+
+- **Hive management** — drop hives on the map; auto-merge within 25m; per-hive drone fleet.
+- **Promo code admin** — gated by passcode `Alon132` (UX) AND server-side `X-Admin-Pass` header (real security). Create / list / deactivate codes.
+- **Unlimited credits** — admin orders are always free.
+- **Live web visualization** — open the server's URL in a browser for a Leaflet map of every hive, drone, flight trail, and order in real time.
+
+### Web visualization
+
+The server hosts a polished web viz at `/`. Dark CartoDB tiles, animated rotor markers, per-hive battery rings, fleet status card. Useful for showing the system off (or debugging).
 
 ---
 
 ## Tech stack
 
-- **Expo SDK 54** running inside **Expo Go** (no custom native build needed).
-- **React Navigation** (stack + bottom tabs) for routing.
-- **Firebase Authentication (JS SDK)** for sign-up, sign-in, password reset — all email/password.
-- **expo-auth-session** for Google OAuth (browser-based flow, works in Expo Go).
-- Apple Sign-In is **disabled in Expo Go** — it requires a native module that Expo Go doesn't ship. The button is left in place but shows a friendly "not available" alert.
-- **AsyncStorage** for Firebase session persistence + the "Terms accepted" flag.
-- **react-native-maps** + **expo-location** for the home map and geofence checks.
-- **react-native-copilot** for the in-app help/demo tour.
-- **expo-linear-gradient**, **@expo/vector-icons** for UI.
+### Mobile
+
+- **Expo SDK 54** in **Expo Go** (no native build).
+- **Firebase Web SDK 12** + `expo-auth-session` for Google OAuth.
+- **React Navigation** 7 (stack + tabs).
+- **react-native-maps** + **expo-location** for the map and geofence.
+- **socket.io-client** for live drone state.
+- **AsyncStorage** for session persistence, offline gallery + order history.
+- **expo-linear-gradient**, **expo-blur**, **@expo/vector-icons** for UI.
+
+### Server
+
+- **Node 20** + **Express** + **Socket.IO** (CommonJS).
+- **firebase-admin** for ID-token verification + Firestore.
+- **Firestore** for persistent user data, credits, ledger, promo codes.
+- In-memory for ephemeral state (active drones, orders during their flight).
+- Hosted on **Render** free tier.
 
 ---
 
-## Prerequisites
+## Architecture at a glance
 
-| Tool | Version | Notes |
-|---|---|---|
-| Node.js | 18+ (20 LTS recommended) | Use `nvm` if juggling versions |
-| Expo CLI | bundled via `npx` | No global install needed |
-| Expo Go app | latest | Install on your iPhone/Android from the App Store / Play Store |
+```
+┌─────────────────┐     Firebase ID token       ┌───────────────────────────┐
+│ Expo Go (phone) │ ──────────────────────────► │ Express + Socket.IO       │
+│   AuthContext   │ ◄────── JSON / events ──── │  ┌──────────────────────┐ │
+│   SimClient     │                             │  │ verifyIdToken        │ │
+└────────┬────────┘                             │  │ requireAuth/Admin    │ │
+         │                                      │  └──────────┬───────────┘ │
+         │                                      │             │             │
+         ▼                                      │  ┌──────────▼───────────┐ │
+   ┌──────────┐                                 │  │ hiveStore (memory)   │ │
+   │ Firebase │ ◄──────── verifyIdToken ────────┤  │ orderStore (memory)  │ │
+   │   Auth   │                                 │  │ droneSim (30Hz tick) │ │
+   └──────────┘                                 │  └──────────────────────┘ │
+                                                │             │             │
+                                                │  ┌──────────▼───────────┐ │
+                                                │  │ userStore (Firestore)│ │
+                                                │  │ promoStore (FS)      │ │
+                                                │  │ credits.js (pure)    │ │
+                                                │  └──────────┬───────────┘ │
+                                                └─────────────┼─────────────┘
+                                                              ▼
+                                                       ┌─────────────┐
+                                                       │  Firestore  │
+                                                       │  users/{uid}│
+                                                       │  promo_codes│
+                                                       └─────────────┘
+```
 
-No JDK, no Android Studio, no Xcode, no Mac required.
+Key invariants:
 
----
-
-## External services & all API keys
-
-### 1. Firebase project (Authentication — free Spark tier)
-
-The auth flow uses the **Firebase Web SDK** for compatibility with Expo Go. All config values are public client-side identifiers — they're not secrets. Access is gated by Firebase's server-side rules.
-
-| Item | Where it lives | Current value |
-|---|---|---|
-| Project ID | `src/config/firebaseConfig.js` | `airsnap-7844f` |
-| API key | `src/config/firebaseConfig.js` | `AIzaSyAUQvPIkGrCOTLZMgodjcwWHnPcIWhgfSE` |
-| Auth domain | `src/config/firebaseConfig.js` | `airsnap-7844f.firebaseapp.com` |
-| Storage bucket | `src/config/firebaseConfig.js` | `airsnap-7844f.firebasestorage.app` |
-| Messaging sender ID | `src/config/firebaseConfig.js` | `229971846721` |
-| App ID | `src/config/firebaseConfig.js` | `1:229971846721:android:e263146c5db7248dbd08c0` |
-| Google OAuth Web Client ID | `src/config/firebaseConfig.js` | `229971846721-8lt6d8fs707tbs1jacamc91utome5m59.apps.googleusercontent.com` |
-
-The `GoogleService-Info.plist` and `google-services.json` files in the project root are leftovers from the native build setup — they're **unused** in the Expo Go build but harmless to keep (and useful if you ever switch to a Dev Client).
-
-#### Provisioning a new Firebase project
-
-If you're forking and want your own Firebase project:
-
-1. Go to https://console.firebase.google.com → **Add project**.
-2. Enable **Authentication** → **Sign-in method** → enable **Email/Password** and **Google**.
-3. Project Settings → **Your apps** → add a **Web app** (icon `</>`) → copy the config object → paste values into `src/config/firebaseConfig.js`.
-4. On the Google sign-in provider page → expand **Web SDK configuration** → copy the **Web client ID** → paste into `GOOGLE_WEB_CLIENT_ID`.
-5. **Critical for Google sign-in in Expo Go:** in Google Cloud Console → APIs & Services → Credentials → click the same Web Client ID → add this to **Authorized redirect URIs**:
-   ```
-   https://auth.expo.io/@<your-expo-username>/airsnap
-   ```
-   (Without this, Google sign-in will return a `redirect_uri_mismatch` error.)
-
-### 2. Google Maps (used by `react-native-maps`)
-
-Currently no Maps API key is configured. On iOS the map renders with Apple Maps by default. On Android, `react-native-maps` will show a blank tile area without a Google Maps API key. Add one in `app.json` under `android.config.googleMaps.apiKey` if you need real Android tiles in development.
-
-### 3. Geofence backend (currently disabled)
-
-`src/hooks/useGeofence.js` calls `${API_BASE_URL}/spatial/validate-geofence` (POST). The original Python backend (`airsnap-server/`) was deleted, so this endpoint **always fails** and the hook degrades to "out of bounds." `src/config/serverConfig.js` still points at `192.168.68.81:4000`. The partner-site distance check in `ProfileScreen.js` works because it uses pure client-side haversine math (`src/utils/geofence.js`).
+- **All credit mutations** go through `applyCreditsTx()` inside a Firestore transaction. Balance is never trusted from the client.
+- **Referral bonus** fires via CAS on `users/{uid}.hasMadeFirstOrder` — exactly once per user.
+- **Admin** = email in `ADMIN_EMAILS` (server-side) — derived in `requireAuth` and passed downstream. `splitPayment` special-cases admin → always free, no ledger writes.
+- **Promo redemption** is transactional — no double-redeem under concurrency.
 
 ---
 
-## First-time setup
+## Quick start
+
+See [SETUP.md](SETUP.md) for the complete guide. TL;DR:
 
 ```bash
-# 1. Clone and install
+# 1. Mobile
 git clone <repo-url>
 cd demo_app
 npm install
-# If you hit "UNABLE_TO_VERIFY_LEAF_SIGNATURE", your local AV/firewall
-# is doing TLS interception. Workaround:
-#   npm config set strict-ssl false
-#   npm install
-#   npm config set strict-ssl true
+# Edit src/config/firebaseConfig.js + src/config/serverConfig.js
+npx expo start --tunnel
 
-# 2. Confirm src/config/firebaseConfig.js has your Firebase values
-#    (defaults already point at the demo Firebase project)
-
-# 3. Start the dev server
-npx expo start
+# 2. Server
+cd airsnap-server
+npm install
+# Set env vars (see SETUP.md §5.3), then:
+node index.js
 ```
-
-Then on your phone:
-- **iPhone:** open the Expo Go app → scan QR code from terminal
-- **Android:** open the Expo Go app → scan QR code from terminal
-- Or run `npx expo start --tunnel` if your phone is on a different network than your laptop
-
----
-
-## How to run on your team's phones
-
-There's no build step — everyone uses Expo Go.
-
-1. Each teammate installs **Expo Go** from the App Store / Play Store.
-2. You run `npx expo start --tunnel` on your laptop.
-3. Send teammates the URL or QR code from the terminal.
-4. They open Expo Go → scan/enter the URL → app loads.
-5. All changes you push to git, they re-scan the QR to pull the latest JS.
-
-For more permanent sharing (so the app keeps running without your laptop), publish a build:
-```bash
-npx expo publish              # creates a permanent URL on Expo's servers
-```
-Then share the URL via Expo Go's "Recently in development" tab or a shareable link.
-
-> If you later want a standalone APK or iOS TestFlight build, see "Switching to a Dev Client" at the bottom of this file.
 
 ---
 
@@ -125,109 +132,194 @@ Then share the URL via Expo Go's "Recently in development" tab or a shareable li
 
 ```
 demo_app/
-├── app.json                       # Expo config
+├── README.md                       # ← you are here
+├── SETUP.md                        # full install guide
+├── App.js                          # Root: wraps providers + navigator
+├── app.json                        # Expo config
 ├── package.json
-├── App.js                         # Root: wraps providers + navigator
-├── src/
-│   ├── components/                # Shared UI (Card, GradientButton, Tour tooltip…)
+│
+├── src/                            # ── Mobile app ──
+│   ├── components/                 # Card, GradientButton, ScreenWrapper, etc.
 │   ├── config/
-│   │   ├── firebaseConfig.js      # Firebase + Google OAuth config
-│   │   └── serverConfig.js        # Stale — only useGeofence.js still uses it
-│   ├── constants/                 # Drone status enums, delivery zone radius, etc.
+│   │   ├── firebaseConfig.js       # Firebase + Google OAuth + admin emails
+│   │   └── serverConfig.js         # API_BASE_URL + SOCKET_URL
+│   ├── constants/                  # Drone status enums, delivery zone radius
 │   ├── context/
-│   │   ├── AuthContext.js         # Firebase JS SDK wrapper — primary auth surface
-│   │   ├── ThemeContext.js        # Dark/light mode toggle
-│   │   ├── LocationContext.js     # expo-location wrapper
-│   │   └── TourContext.js         # Cross-screen help-tour flag
+│   │   ├── AuthContext.js          # Firebase + bootstrap /users/me + me/refreshMe
+│   │   ├── ThemeContext.js         # Dark/light toggle
+│   │   ├── LocationContext.js      # expo-location wrapper
+│   │   └── TourContext.js          # In-app help-tour flag
 │   ├── hooks/
-│   │   └── useGeofence.js         # Calls deleted Python backend (broken — see above)
+│   │   └── useGeofence.js          # Calls server's /spatial/validate-geofence
 │   ├── navigation/
-│   │   └── AppNavigator.js        # Stack + tabs; routes Login/SignUp/ForgotPassword
+│   │   └── AppNavigator.js         # Routes — auth, terms, main tabs, profile stack
 │   ├── screens/
-│   │   ├── LoginScreen.js
-│   │   ├── SignUpScreen.js
+│   │   ├── LoginScreen.js          # + Google OAuth
+│   │   ├── SignUpScreen.js         # + referral code field
 │   │   ├── ForgotPasswordScreen.js
+│   │   ├── EmailVerificationScreen.js
 │   │   ├── TermsAcceptanceScreen.js
-│   │   ├── HomeScreen.js
+│   │   ├── HomeScreen.js           # Map, hive markers, geofence, order CTA
 │   │   ├── PackageSelectScreen.js
-│   │   ├── PaymentScreen.js
+│   │   ├── PaymentScreen.js        # ₪ breakdown, credits + card + promo code
 │   │   ├── FlightTrackingScreen.js
-│   │   ├── LiveSessionScreen.js
+│   │   ├── LiveSessionScreen.js    # Live drone view + end-early
 │   │   ├── ContentDeliveryScreen.js
-│   │   ├── GalleryScreen.js
-│   │   ├── ProfileScreen.js
-│   │   ├── OrderHistoryScreen.js
+│   │   ├── GalleryScreen.js        # AsyncStorage-backed
+│   │   ├── ProfileScreen.js        # Settings + menu + admin items
+│   │   ├── CreditsScreen.js        # Balance, referral code, ledger, redeem
+│   │   ├── PromoCodeAdminScreen.js # Admin-only, passcode-gated
+│   │   ├── HiveAdminScreen.js      # Admin-only, drop / merge / delete hives
+│   │   ├── OrderHistoryScreen.js   # Server-backed + cached
 │   │   ├── HelpScreen.js
 │   │   ├── PrivacyTermsScreen.js
 │   │   └── PartnersAboutScreen.js
-│   ├── theme/                     # Colors, spacing, typography
-│   └── utils/                     # Pure helpers (geofence math, formatters)
-└── assets/                        # Icons, splash, partner photos
+│   ├── services/
+│   │   └── SimClient.js            # HTTP + socket wrapper, auto-attaches ID token
+│   ├── theme/                      # Colors, spacing, typography
+│   └── utils/                      # haversineDistanceMeters, formatters
+│
+└── airsnap-server/                 # ── Simulation server ──
+    ├── index.js                    # Routes + socket handlers + drone lifecycle
+    ├── auth.js                     # Firebase Admin init, requireAuth/Admin/AdminPass
+    ├── hiveStore.js                # In-memory hive fleet + charging tick
+    ├── orderStore.js               # In-memory orders + payment status
+    ├── droneSim.js                 # 30Hz physics, 10Hz broadcast, ENU frame
+    ├── samples.js                  # Stock photo / video URLs for delivery
+    ├── userStore.js                # Firestore: users + ledger + referral
+    ├── promoStore.js               # Firestore: promo codes + redemptions
+    ├── credits.js                  # Pure helpers — splitPayment, validation
+    ├── geofence.js                 # Haversine distance
+    ├── public/                     # Web viz (index.html, sim.js)
+    └── render.yaml                 # Render deployment blueprint
 ```
 
 ---
 
 ## Authentication flow
 
-`src/context/AuthContext.js` is the chokepoint — every screen consumes it via `useAuth()`. The exported shape:
+`src/context/AuthContext.js` is the chokepoint — every screen consumes it via `useAuth()`:
 
 ```js
 const {
-  user,                 // { id, name, email, avatar, provider } | null
-  isLoading,            // true until the first onAuthStateChanged fires
-  hasAcceptedTerms,     // local AsyncStorage flag
-  signInWithEmail,      // (email, password) => void
-  signUp,               // (name, email, password) => void
-  signInWithGoogle,     // () => void  — opens browser OAuth (expo-auth-session)
-  signInWithApple,      // () => void  — disabled in Expo Go; shows alert
-  sendPasswordReset,    // (email) => void
-  signOut,              // () => void
-  acceptTerms,          // () => void
+  user,                       // { id, name, email, avatar, provider } | null
+  isLoading,                  // true until first onAuthStateChanged fires
+  hasAcceptedTerms,           // local AsyncStorage flag
+  me,                         // server's view: { credits, referralCode, isAdmin, … }
+  refreshMe,                  // () => Promise<me>
+  setPendingReferralCode,     // (code) — stashed by SignUp before sign-in completes
+  signInWithEmail,            // (email, password)
+  signUp,                     // (name, email, password)
+  signInWithGoogle,           // browser OAuth via expo-auth-session
+  sendPasswordReset,
+  signOut,
+  acceptTerms,
+  resendVerificationEmail,
+  reloadUser,
 } = useAuth();
 ```
 
-- **Session persistence + auto refresh**: Firebase handles it natively via AsyncStorage. Force-quit and reopen the app → you're still signed in.
-- **Errors**: every method throws `Error` with a friendly message (e.g. "Incorrect email or password"). Screens already wrap calls in `try/catch` + `Alert.alert`.
-- **Provider field** on `user` is one of `'email' | 'google' | 'apple'`.
+- Firebase persists the session in AsyncStorage; force-quit and reopen → still signed in.
+- On every sign-in, AuthContext calls `simApi.bootstrapMe()` which hits `POST /users/me` on the server — idempotent. Creates the Firestore user doc if missing, grants signup bonus, links referral.
+- Routing decides the visible stack ([src/navigation/AppNavigator.js](src/navigation/AppNavigator.js)):
+  1. Loading spinner
+  2. TermsAcceptance if first launch
+  3. AuthStack if signed out
+  4. EmailVerification if email not verified (admins bypass)
+  5. MainTabs once everything checks out
 
-Routing decides the visible stack (`src/navigation/AppNavigator.js`):
-1. Loading spinner while `isLoading` is true.
-2. `TermsAcceptanceScreen` if the user has never accepted T&Cs.
-3. **AuthStack** (Login / SignUp / ForgotPassword) if `user` is null.
-4. **MainTabs** (Order / Gallery / Profile) once signed in.
+---
+
+## Server API summary
+
+Detail in [airsnap-server/index.js](airsnap-server/index.js).
+
+### Public
+
+- `GET  /health` — liveness
+- `GET  /hives` — list all hives
+- `POST /spatial/validate-geofence` — distance to nearest hive, available drones
+
+### Authed (Bearer token)
+
+- `POST /users/me` — bootstrap user doc (idempotent, optional `referralCode` body)
+- `GET  /users/me` — current user + isAdmin
+- `GET  /users/me/ledger` — last 20 credit movements
+- `POST /promos/redeem` — redeem a code (balance → credits added; discount → response only)
+- `POST /orders` — create order (optionally with `discountCode`); returns split
+- `GET  /orders` — your orders
+- `GET  /orders/:id` — one order + live drone state
+- `POST /orders/:id/confirm-payment` — **stop-gap until Meshulam** webhook lands
+
+### Admin (email check)
+
+- `POST /hives` — create / merge
+- `DELETE /hives/:id` — delete
+
+### Admin + passcode (`X-Admin-Pass` header)
+
+- `POST /admin/promos` — create promo code
+- `GET  /admin/promos` — list all
+- `DELETE /admin/promos/:code` — deactivate
+
+### Webhook (not yet wired)
+
+- `POST /payments/webhook` — Meshulam will call this; signature verification TODO
+
+### Socket.IO (server → client)
+
+`drone:state`, `order:status`, `session:progress`, `hive:created`, `hive:updated`, `hive:deleted`, `hives:snapshot`, `order:delivered`, `order:paid`, `user:location`
+
+### Socket.IO (client → server)
+
+`order:join`, `user:location`, `session:start`, `session:end`, `hello:viewer`
+
+---
+
+## Environment variables (server)
+
+| Var | Required | Default | Purpose |
+|---|---|---|---|
+| `FIREBASE_PROJECT_ID` | yes | — | ID-token verification |
+| `FIREBASE_SERVICE_ACCOUNT` | for Firestore | — | Raw or base64 JSON of service account |
+| `ADMIN_EMAILS` | yes | empty | Comma-separated admin emails |
+| `ADMIN_PROMO_PASS` | for promo admin | — | Must match mobile constant; `X-Admin-Pass` header |
+| `SIGNUP_BONUS_NIS` | no | `5` | Welcome credit amount |
+| `SIGNUP_BONUS_EXPIRES` | no | `2026-06-30T23:59:59Z` | After this, no signup bonus |
+| `REFERRAL_BONUS_NIS` | no | `20` | Referrer's payout on referee's first paid order |
+| `PORT` | no | `4000` | Render injects this automatically |
+| `MESHULAM_WEBHOOK_SECRET` | future | — | For HMAC validation when wired |
 
 ---
 
 ## Common commands
 
 ```bash
-npx expo start              # Start Metro bundler
-npx expo start --tunnel     # Same, but accessible to phones on a different network
-npx expo start --clear      # Start with a fresh Metro cache
+# Mobile
+npx expo start                    # Local QR (same network)
+npx expo start --tunnel           # Reachable from any network
+npx expo start --clear            # Fresh Metro cache
+
+# Server (local)
+cd airsnap-server
+node index.js                     # production
+node --watch index.js             # dev with reload
+
+# Render
+git push                          # auto-deploys main branch
 ```
 
 ---
 
-## Known issues & limitations
+## Known limitations & roadmap
 
-- **No real backend.** Orders, payments, and the drone session are all simulated client-side.
-- **Geofence hook is broken** (see "Geofence backend" above).
-- **Apple Sign-In is disabled** in Expo Go (the button shows a friendly error alert). To enable it, switch to a Dev Client (see below).
-- **Google Sign-In requires** the redirect URI configured in Google Cloud Console (see "Provisioning a new Firebase project" step 5).
-- **`strict-ssl` workaround.** If `npm install` fails with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, your local AV/firewall is doing TLS interception. Use the workaround in step 1 of "First-time setup."
-
----
-
-## Switching to a Dev Client later
-
-If at some point you need native modules (Apple Sign-In, more polished Google OAuth, push notifications via FCM, etc.), graduate to a **Dev Client**:
-
-1. `npm install expo-dev-client @react-native-firebase/app @react-native-firebase/auth @react-native-google-signin/google-signin expo-apple-authentication expo-build-properties`
-2. Re-add the four plugin entries to `app.json` (Firebase, Google sign-in, build properties, plus `"usesAppleSignIn": true` on iOS).
-3. `npx expo prebuild --clean`
-4. Build via EAS: `eas build --platform android --profile preview` (free) or `--platform ios` (needs Apple Dev account, $99/yr).
-
-Reuse instructions for that path: see git history at the commit that removed the native libraries — the AuthContext can be reverted from the JS SDK version back to the native `@react-native-firebase/auth` API.
+- **No real payment processor wired yet.** The `/orders/:id/confirm-payment` stop-gap simulates a successful card capture. Adding Meshulam means:
+  1. Replace the mobile "Pay" button with the Meshulam SDK launcher.
+  2. Wire `POST /payments/webhook` to verify Meshulam HMAC using `MESHULAM_WEBHOOK_SECRET`, then flip `paymentStatus` to `'paid'` and call `onPaymentSucceeded(orderId)` (same path the stop-gap uses).
+  3. Remove `POST /orders/:id/confirm-payment`.
+- **Apple Sign-In disabled** in Expo Go (native-only). Switch to a Dev Client to enable.
+- **Free Render tier sleeps after 15 min idle** — first request after sleep takes ~20s.
+- **Orders are kept in memory.** If the server restarts during a flight, the in-progress order's drone state is lost (the order doc in Firestore stays consistent — user is not double-charged). Acceptable for a demo.
 
 ---
 
