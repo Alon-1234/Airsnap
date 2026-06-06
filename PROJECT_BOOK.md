@@ -1059,7 +1059,7 @@ POST /promos/redeem  + Bearer token
 
 ### 4.1 LoginScreen
 
-![LoginScreen](assets/book/01_login.png)
+![LoginScreen](assets/book/01_login.jpg)
 
 המסך הראשון שכל משתמש רואה (במצב light). הוא בנוי מארבע סקציות אנכיות:
 
@@ -1074,7 +1074,7 @@ POST /promos/redeem  + Bearer token
 
 ### 4.2 SignUpScreen
 
-![SignUpScreen](assets/book/02_signup.png)
+![SignUpScreen](assets/book/02_signup.jpg)
 
 מסך ההרשמה. הסקציות:
 
@@ -1109,7 +1109,7 @@ POST /promos/redeem  + Bearer token
 
 ### 4.5 HomeScreen
 
-![HomeScreen](assets/book/06_home.png)
+![HomeScreen](assets/book/06_home.jpg)
 
 מסך הבית מציג את מפת האזור (Apple Maps) עם המיקום הנוכחי של המשתמש מסומן כנקודה כחולה native של iOS, וכל הכוורות הקרובות. בצילום המסך, המשתמש נמצא בהר אדר עם כוורת ״Har Adar״ סמוכה — מעגל delivery zone כחול (500m) סביב המשתמש מסמן את הטווח של היחידות.
 
@@ -1132,7 +1132,7 @@ POST /promos/redeem  + Bearer token
 
 ### 4.6 PackageSelectScreen
 
-![PackageSelectScreen](assets/book/07_packages.png)
+![PackageSelectScreen](assets/book/07_packages.jpg)
 
 מסך בחירת החבילה. בראש המסך: כפתור חזרה + כותרת ״Choose Package״ + chip ירוק ״Live Location״ (מסמן שההזמנה תהיה במיקום הנוכחי, להבדיל מאתר שותף).
 
@@ -1146,7 +1146,7 @@ POST /promos/redeem  + Bearer token
 
 ### 4.7 PaymentScreen
 
-![PaymentScreen — Admin (Free)](assets/book/08_payment.png)
+![PaymentScreen — Admin (Free)](assets/book/08_payment.jpg)
 
 מסך התשלום במצב **מנהל** (״Admin balance: Unlimited״ → ״Charge: Free״). זה הוכחת ההיגיון של `splitPayment(total, balance, isAdmin=true)` — מנהל לעולם לא מחויב.
 
@@ -1170,7 +1170,7 @@ POST /promos/redeem  + Bearer token
 
 ### 4.8 FlightTrackingScreen
 
-![FlightTrackingScreen — On the Way](assets/book/09_flight.png)
+![FlightTrackingScreen — On the Way](assets/book/09_flight.jpg)
 
 מסך המעקב במצב ״On the Way״ — הרחפן יצא מהכוורת (Har Adar) ובדרך לנקודת המשתמש. ה-UI מתעדכן ב-10Hz מאירועי `drone:state` של Socket.IO.
 
@@ -1192,7 +1192,7 @@ POST /promos/redeem  + Bearer token
 
 #### דיאלוג ביטול הזמנה
 
-![FlightTrackingScreen — Abandon Dialog](assets/book/10_abandon_dialog.png)
+![FlightTrackingScreen — Abandon Dialog](assets/book/10_abandon_dialog.jpg)
 
 הדיאלוג ש-iOS מציג בלחיצה על Back כאשר הרחפן עוד לא במצב הקלטה. בצילום, ה-StatusBadge כבר מציג ״Arrived״ — הרחפן הגיע לנקודה וממתין לכפתור ״Start Session״.
 
@@ -1208,7 +1208,7 @@ POST /promos/redeem  + Bearer token
 
 ### 4.9 LiveSessionScreen
 
-![LiveSessionScreen](assets/book/11_live.png)
+![LiveSessionScreen](assets/book/11_live.jpg)
 
 מסך הסשן הלייב. המסך נטען מיד אחרי לחיצה על ״Start Session״ ב-FlightTracking, ושולח אוטומטית `session:start` לשרת — מה שמעביר את הרחפן מ-ARRIVED ל-RECORDING.
 
@@ -1231,7 +1231,7 @@ POST /promos/redeem  + Bearer token
 
 ### 4.10 ContentDeliveryScreen
 
-![ContentDeliveryScreen — Delivered](assets/book/12_delivery.png)
+![ContentDeliveryScreen — Delivered](assets/book/12_delivery.jpg)
 
 מסך מסירת התוכן במצב Delivered (אחרי שהרחפן חזר וההזמנה הושלמה). המסך מתחיל במצב Processing עם ספינר מסתובב; כשמגיע `order:delivered` socket event עם `media` — המסך מחליף ל-Delivered עם אנימציית spring scale.
 
@@ -1265,7 +1265,7 @@ POST /promos/redeem  + Bearer token
 
 ### 4.12 OrderHistoryScreen
 
-![OrderHistoryScreen](assets/book/15_history.png)
+![OrderHistoryScreen](assets/book/15_history.jpg)
 
 מסך היסטוריית ההזמנות במצב light. צילום המסך מציג ארבע הזמנות מסופקות מ-6-7 ביוני 2026:
 
@@ -1292,7 +1292,7 @@ POST /promos/redeem  + Bearer token
 
 #### ProfileScreen — Overview tab (Dark Mode)
 
-![ProfileScreen — Overview Dark](assets/book/16_profile_overview_dark.png)
+![ProfileScreen — Overview Dark](assets/book/16_profile_overview_dark.jpg)
 
 טאב ה-Overview ב-dark mode. רכיבים:
 
@@ -1314,7 +1314,7 @@ POST /promos/redeem  + Bearer token
 
 #### ProfileScreen — Overview tab (Light Mode)
 
-![ProfileScreen — Overview Light](assets/book/16b_profile_overview_light.png)
+![ProfileScreen — Overview Light](assets/book/16b_profile_overview_light.jpg)
 
 אותו תוכן ב-light mode. ההבדלים העיקריים:
 
@@ -1327,7 +1327,7 @@ POST /promos/redeem  + Bearer token
 
 #### ProfileScreen — Partners tab
 
-![ProfileScreen — Partners](assets/book/16c_profile_partners.png)
+![ProfileScreen — Partners](assets/book/16c_profile_partners.jpg)
 
 לחיצה על ״Partners״ בטאבים מציגה את `PartnerTab`. רכיבים:
 
@@ -1341,7 +1341,7 @@ POST /promos/redeem  + Bearer token
 
 ### 4.14 CreditsScreen
 
-![CreditsScreen — Admin](assets/book/17_credits.png)
+![CreditsScreen — Admin](assets/book/17_credits.jpg)
 
 מסך הקרדיט במצב light, של חשבון מנהל (״Unlimited״). רכיבים:
 
@@ -1370,7 +1370,7 @@ POST /promos/redeem  + Bearer token
 
 ### 4.15 HiveAdminScreen
 
-![HiveAdminScreen](assets/book/18_hive_admin.png)
+![HiveAdminScreen](assets/book/18_hive_admin.jpg)
 
 מסך ניהול הכוורות (אדמין). הצילום מציג את הר אדר עם כוורת אחת קיימת.
 
