@@ -2,14 +2,14 @@
 
 **צילום אווירי לפי דרישה — פלטפורמת קצה-לקצה לסטארטאפ AirSnap**
 
-מחבר: **[שם המשתמש המלא]**
+מחבר: **אלון כתב**
 סטארטאפ: **AirSnap**, נוסד על ידי סטודנטים מאוניברסיטת רייכמן.
 
 ---
 
 > ## כל הזכויות שמורות
 >
-> הקוד, התיעוד, העיצוב והנכסים בפרויקט זה הם רכושם הבלעדי של **[שם המשתמש המלא]** ושל סטארטאפ **AirSnap**, אשר נוסד על ידי סטודנטים מאוניברסיטת רייכמן.
+> הקוד, התיעוד, העיצוב והנכסים בפרויקט זה הם רכושם הבלעדי של **אלון כתב** ושל סטארטאפ **AirSnap**, אשר נוסד על ידי סטודנטים מאוניברסיטת רייכמן.
 >
 > אסור להעתיק, להפיץ, לשנות, או להשתמש בקוד או בנכסים אלה, באופן מלא או חלקי, בלי רשות מפורשת בכתב מאחד מבעלי הזכויות הללו. כל שימוש לא-מורשה ייחשב הפרת זכויות יוצרים וייתכן שיגרור הליכים משפטיים.
 >
@@ -1059,38 +1059,37 @@ POST /promos/redeem  + Bearer token
 
 ### 4.1 LoginScreen
 
-> **[תמונה: מסך התחברות — LoginScreen]**
->
-> תיאור צפוי: לוגו AirSnap בראש המסך. שדה אימייל, שדה סיסמה (עם כפתור עין להצגה), כפתור Login עיקרי, כפתור ״Continue with Google״, קישור ״Don't have an account? Create here״, וקישור ״Forgot password?״.
->
-> הדגשות:
-> - לוגו ושם המוצר
-> - שדה אימייל
-> - שדה סיסמה + כפתור הצגה
-> - כפתור Login
-> - כפתור Google sign-in
-> - קישור ל-SignUpScreen
-> - קישור ל-ForgotPasswordScreen
+![LoginScreen](assets/book/01_login.png)
+
+המסך הראשון שכל משתמש רואה (במצב light). הוא בנוי מארבע סקציות אנכיות:
+
+1. **לוגו ושם המוצר** — אייקון paper-plane בגרדיאנט כחול-טורקיז במרכז, מתחתיו ״AirSnap״ ב-bold, ותת-כותרת ״Stunning drone photos. Zero effort.״
+2. **כניסות חברתיות** — שני כפתורים לבנים: ״Continue with Google״ (אייקון G אדום) ו-״Continue with Apple״ (אייקון Apple). ב-Expo Go, כפתור Apple מציג Alert חברתי כי הוא דורש native module.
+3. **מפריד** — קו דק עם הטקסט ״or sign in with email״.
+4. **טופס אימייל** — שדה ״Email address״ (אייקון מעטפה), שדה ״Password״ (אייקון מנעול + כפתור עין להצגה/הסתרה), קישור ״Forgot password?״ ימני, כפתור gradient בולט ״Sign In״ (כחול → טורקיז), וקישור תחתון ״Don't have an account? **Sign Up**״.
 
 הקובץ: [src/screens/LoginScreen.js](src/screens/LoginScreen.js).
 
-המסך משתמש ב-`AuthContext` לקריאת `signInWithEmail` ו-`signInWithGoogle`. השדות מנוהלים עם `useState`. בשגיאה — `Alert.alert` עם הודעה ידידותית מ-`friendlyError(err)`.
+המסך משתמש ב-`AuthContext` לקריאת `signInWithEmail` ו-`signInWithGoogle`. השדות מנוהלים עם `useState`. בשגיאה — `Alert.alert` עם הודעה ידידותית מ-`friendlyError(err)` (למשל ״Incorrect email or password״ במקום ההודעה הגולמית של Firebase).
 
 ### 4.2 SignUpScreen
 
-> **[תמונה: מסך הרשמה — SignUpScreen]**
->
-> תיאור צפוי: כפתור חזרה בפינה שמאלית עליונה. כותרת ״Create Account״. כפתורי Google/Apple. מפריד ״or use email״. שדות: שם מלא, אימייל, סיסמה, אימות סיסמה, קוד הפניה (אופציונלי) — עם אייקון מתנה. כפתור gradient ״Create Account״. למטה: ״Already have an account? Sign In״.
->
-> הדגשות:
-> - כפתור חזרה
-> - כותרת ותת-כותרת
-> - כפתורי social sign-up
-> - מפריד
-> - שדות הטופס (5)
-> - שדה Referral code (חדש)
-> - כפתור Create Account
-> - קישור חזרה ל-Login
+![SignUpScreen](assets/book/02_signup.png)
+
+מסך ההרשמה. הסקציות:
+
+1. **כפתור חזרה** — חץ קטן בפינה שמאלית עליונה לחזרה ל-LoginScreen.
+2. **Header** — ״Create Account״ בולט ותת-כותרת ״Join AirSnap and start capturing amazing aerial content.״
+3. **כניסות חברתיות** — ״Sign up with Google״ ו-״Sign up with Apple״.
+4. **מפריד** — ״or use email״.
+5. **שדות הטופס** — חמישה שדות אחד תחת השני, כל אחד עם אייקון:
+   - Full name (אייקון איש)
+   - Email address (אייקון מעטפה)
+   - Password (אייקון מנעול + כפתור עין). Placeholder מראה את דרישות הסיסמה: ״Password (8+ chars, A-Z, a-z, 0-9)״
+   - Confirm password (אייקון מגן)
+   - **Referral code (optional)** (אייקון מתנה) — שדה חדש לצרכי הפיצ׳ר של בונוס הפניה
+6. **כפתור Create Account** — gradient כחול-טורקיז.
+7. **קישור תחתון** — ״Already have an account? **Sign In**״.
 
 הקובץ: [src/screens/SignUpScreen.js](src/screens/SignUpScreen.js).
 
@@ -1098,218 +1097,353 @@ POST /promos/redeem  + Bearer token
 
 ### 4.3 EmailVerificationScreen
 
-> **[תמונה: מסך אימות אימייל]**
+> **[תמונה — לא צורפה. placeholder לעדכון עתידי]**
 >
-> תיאור צפוי: אייקון מעטפה גדול במרכז. כותרת ״Verify your email״. תת-כותרת מסבירה שנשלח אימייל לכתובת X. שני כפתורים: ״I've verified — refresh״ ו-״Resend Verification Email״. בתחתית — כפתור Sign Out.
->
-> הדגשות:
-> - אייקון מעטפה
-> - כותרת + תיאור
-> - כפתור Refresh
-> - כפתור Resend
-> - כפתור Sign Out
+> תיאור: אייקון מעטפה גדול במרכז. כותרת ״Verify your email״. תת-כותרת המסבירה שנשלח אימייל לכתובת המשתמש. שני כפתורים: ״I've verified — refresh״ ו-״Resend Verification Email״. בתחתית — קישור Sign Out.
 
 ### 4.4 TermsAcceptanceScreen
 
-> **[תמונה: מסך אישור תנאי שימוש]**
+> **[תמונה — לא צורפה. placeholder לעדכון עתידי]**
 >
-> תיאור צפוי: מוצג רק בפעם הראשונה שהמשתמש פותח את האפליקציה. כותרת ״Welcome to AirSnap״, טקסט קצר, צ׳קבוקס ״I accept the Terms״, כפתור Accept.
->
-> הדגשות:
-> - כותרת ולוגו
-> - גוף הטקסט (גלילה)
-> - צ׳קבוקס
-> - כפתור Accept
+> תיאור: מוצג רק בפעם הראשונה שהמשתמש פותח את האפליקציה. כותרת ״Welcome to AirSnap״, טקסט קצר, צ׳קבוקס ״I accept the Terms״, כפתור Accept.
 
 ### 4.5 HomeScreen
 
-> **[תמונה: מסך הבית — HomeScreen]**
->
-> תיאור צפוי: מפה במסך מלא עם המיקום הנוכחי של המשתמש (נקודת location כחולה native), סמני הכוורות הקרובות, מעגלי delivery zone (500m צהוב חצי-שקוף). בתחתית — bottom card עם פרטי הכוורת הקרובה, מספר הרחפנים הזמינים, וכפתור גדול ״Order a Drone״.
->
-> הדגשות:
-> - מפה + tile layer
-> - location מקור המשתמש
-> - סמני כוורות
-> - מעגלי delivery zone
-> - bottom card עם הכוורת הקרובה
-> - כפתור Order a Drone
-> - כפתור Profile / Menu בפינה
+![HomeScreen](assets/book/06_home.png)
+
+מסך הבית מציג את מפת האזור (Apple Maps) עם המיקום הנוכחי של המשתמש מסומן כנקודה כחולה native של iOS, וכל הכוורות הקרובות. בצילום המסך, המשתמש נמצא בהר אדר עם כוורת ״Har Adar״ סמוכה — מעגל delivery zone כחול (500m) סביב המשתמש מסמן את הטווח של היחידות.
+
+רכיבים מסומנים:
+
+1. **כפתור עזרה** (״?״ עליון ימני) — פותח את ה-help tour שמראה למשתמשים חדשים איך להזמין.
+2. **המפה** — Apple Maps. השכבה native של iOS; מציגה את הרחובות, השמות והטופוגרפיה.
+3. **נקודת המשתמש** — הנקודה הכחולה הקטנה. סופקה אוטומטית ע״י `showsUserLocation` של `react-native-maps`.
+4. **מעגל delivery zone** — מעגל כחול חצי-שקוף ברדיוס 500m. מסמן את האזור שבו אפשר להזמין.
+5. **סמן הכוורת** — בצילום זה, המעגל המשושה הירוק במרכז המפה.
+6. **Bottom card** — כרטיס תחתון אטום עם:
+   - ״Nearest hive: Har Adar | 500 m active border״
+   - בדיקת geofence: ״✓ Inside delivery border״ (ירוק)
+   - הודעה: ״You are inside the delivery zone. 1 drone ready. Distance 0.26 km״
+   - כפתור gradient ״Order Drone״ עם אייקון paper plane
 
 הקובץ: [src/screens/HomeScreen.js](src/screens/HomeScreen.js).
 
-המסך משתמש ב-`react-native-maps` עם הפרופ `showsUserLocation`. רשימת הכוורות נטענת ראשונה דרך `simApi.listHives()` ואז מתעדכנת בזמן אמת ע״י `sim.onHiveCreated/Updated/Deleted`. ה-state של ה-geofence ניהל ע״י ה-hook `useGeofence` שמקבל `triggerKey` שמתעדכן בכל פעם שמספר הכוורות משתנה.
+המסך משתמש ב-`react-native-maps` עם הפרופ `showsUserLocation`. רשימת הכוורות נטענת ראשונה דרך `simApi.listHives()` ואז מתעדכנת בזמן אמת ע״י `sim.onHiveCreated/Updated/Deleted`. ה-state של ה-geofence מנוהל ע״י ה-hook `useGeofence` שמקבל `triggerKey` שמתעדכן בכל פעם שמספר הכוורות משתנה — כדי שהכפתור יידלק/יכבה מיד כשמנהל מוסיף או מוחק כוורת.
 
 ### 4.6 PackageSelectScreen
 
-> **[תמונה: מסך בחירת חבילה]**
->
-> תיאור צפוי: כותרת ״Choose your package״. רשימת 3 חבילות אנכיות: Lite (60s, 10 photos), Standard (90s, 25 photos + video), Premium (120s, 50 photos + extended video). כל חבילה ככרטיס עם אייקון, שם, פירוט, מחיר, ומכפת ״Select״. בתחתית הסבר קצר על המיקום.
->
-> הדגשות:
-> - כותרת
-> - כרטיסי חבילות (3)
-> - אייקון, שם, מאפיינים, מחיר
-> - כפתור Select
-> - כפתור חזרה
+![PackageSelectScreen](assets/book/07_packages.png)
+
+מסך בחירת החבילה. בראש המסך: כפתור חזרה + כותרת ״Choose Package״ + chip ירוק ״Live Location״ (מסמן שההזמנה תהיה במיקום הנוכחי, להבדיל מאתר שותף).
+
+שלוש החבילות הזמינות (`PACKAGES` ב-`src/constants/appData.js`):
+
+1. **Quick Snap** — $9.99 — סשן 3 דקות — ״10 high-res aerial photos from multiple angles״ — chip ״10 Photos״ — radio ״Tap to select״.
+2. **Sky View** (נבחרה בצילום — מסגרת כחולה + radio מלא) — $19.99 — סשן 7 דקות — תווית gradient ״MOST POPULAR״ בפינה הימנית — ״25 photos + a 60-second cinematic video״ — chip ״25 Photos״ + ״Video״ — radio ״Selected״.
+3. **Epic Flight** — $39.99 — סשן 15 דקות — ״50 photos, 3-minute video, 360° panorama״ — chip ״50 Photos״ + ״Video״ — radio ״Tap to select״.
+
+בתחתית — כפתור gradient ״Continue — $19.99״ עם חץ ימני, שמעדכן את הסכום אוטומטית לפי החבילה הנבחרת.
 
 ### 4.7 PaymentScreen
 
-> **[תמונה: מסך התשלום — PaymentScreen]**
->
-> תיאור צפוי: כותרת ״Confirm & Pay״. כרטיס Order Summary: מיקום, שם החבילה, חלוקת Package + Tax + Total. תחתיו: יתרת קרדיט (Unlimited אם אדמין), שורת Credits applied, שורת Card charge. כרטיס Promo Code עם שדה טקסט. רשימת אמצעי תשלום (Apple Pay, Google Pay, Credit Card). כפתור gradient ״Place Order — ₪XX.XX״ עם אייקון מנעול. בתחתית — טקסט אבטחה.
->
-> הדגשות:
-> - Order summary card
-> - שורת Total
-> - יתרת קרדיט
-> - פיצול Credits / Card charge
-> - שדה Promo Code
-> - אמצעי תשלום (selected highlighted)
-> - כפתור Place Order
-> - טקסט אבטחה
+![PaymentScreen — Admin (Free)](assets/book/08_payment.png)
+
+מסך התשלום במצב **מנהל** (״Admin balance: Unlimited״ → ״Charge: Free״). זה הוכחת ההיגיון של `splitPayment(total, balance, isAdmin=true)` — מנהל לעולם לא מחויב.
+
+רכיבי המסך:
+
+1. **Order Summary card** (עליון)
+   - מיקום: ״Live Location״ עם אייקון location pin ירוק
+   - חבילה: ״Sky View — 7 min״ עם אייקון video כחול
+   - שורות מחיר: ״Package ₪19.99״, ״Tax (8%) ₪1.60״
+   - שורת Total: **₪21.59** בצבע טורקיז בולט
+2. **Admin balance row** — ״Admin balance: Unlimited״
+3. **Charge row** — ״Charge: Free״ בירוק (משתמש רגיל היה רואה כאן את ההפרש הצריך לחיוב)
+4. **PROMO CODE (OPTIONAL)** — שדה ״Enter discount code (validated at chec...״ עם הסבר תחתון: ״Balance-type codes go in the Credits screen. Discount codes apply here.״
+5. **PAYMENT METHOD** — שלוש אופציות:
+   - **Apple Pay** — נבחרה (מסגרת כחולה + checkmark)
+   - Google Pay
+   - Credit Card
+6. **כפתור Place Order** (לא נראה במלואו בצילום) — gradient עם אייקון מנעול. עבור מנהל הכפתור מציג ״Place Order — Free (admin)״.
+
+הקובץ: [src/screens/PaymentScreen.js](src/screens/PaymentScreen.js).
 
 ### 4.8 FlightTrackingScreen
 
-> **[תמונה: מסך מעקב טיסה — FlightTrackingScreen]**
->
-> תיאור צפוי: StatusBadge בראש (״Drone En Route״). כרטיס מפה placeholder. 3 כרטיסי סטטוס בשורה: Est. Arrival (ETA), km Away, Battery %. כרטיס Timeline אנכי עם 3 נקודות: Assigning → En Route → Arrived. כשהרחפן הגיע — כפתור gradient ״Start Session״ עם אייקון play.
->
-> הדגשות:
-> - StatusBadge
-> - מפה
-> - 3 כרטיסי סטטוס
-> - Timeline + pulse
-> - גובה ומידע נוסף
-> - כפתור Start Session (מופיע רק כש-ARRIVED)
-> - דיאלוג Abandon (מופיע בלחיצת Back) — תמונה נפרדת
+![FlightTrackingScreen — On the Way](assets/book/09_flight.png)
+
+מסך המעקב במצב ״On the Way״ — הרחפן יצא מהכוורת (Har Adar) ובדרך לנקודת המשתמש. ה-UI מתעדכן ב-10Hz מאירועי `drone:state` של Socket.IO.
+
+רכיבים:
+
+1. **StatusBadge** ״On the Way״ (כחול) — בא ישירות מ-`droneState.status === EN_ROUTE`.
+2. **Map placeholder card** — מציג את הקואורדינטות (״Live map — (31.8312, 35.1272)״), קו שדרגים בין סמל paper-plane (הרחפן) לסמל location pin (היעד), ו-״From hive: Har Adar״ למטה.
+3. **שלושה כרטיסי סטטוס בשורה**:
+   - ⏰ **0:39 Est. Arrival** — זמן הגעה משוער (מ-`droneState.etaSec`)
+   - 📈 **0.25 km Away** — מרחק נותר (מ-`droneState.distanceMeters` חלקי 1000)
+   - 🔋 **100% Battery** — סוללה בירוק (מ-`droneState.battery`)
+4. **PROGRESS card** — Timeline אנכי בן 3 שלבים:
+   - ✅ **Assigning Drone** (ירוק/done)
+   - 🔵 **Drone En Route** (כחול פולסי/active)
+   - ⚪ **Arrived at Location** (אפור/pending)
+5. **Altitude: 2 m** — גובה נוכחי. הרחפן כרגע ממש מעל הקרקע כי הוא בתחילת הטיסה.
+
+הקובץ: [src/screens/FlightTrackingScreen.js](src/screens/FlightTrackingScreen.js).
+
+#### דיאלוג ביטול הזמנה
+
+![FlightTrackingScreen — Abandon Dialog](assets/book/10_abandon_dialog.png)
+
+הדיאלוג ש-iOS מציג בלחיצה על Back כאשר הרחפן עוד לא במצב הקלטה. בצילום, ה-StatusBadge כבר מציג ״Arrived״ — הרחפן הגיע לנקודה וממתין לכפתור ״Start Session״.
+
+המסך:
+
+1. **Alert title** — ״Abandon this order?״ בולט.
+2. **Alert body** — ״The drone is still on its way (or waiting for you to start). If you leave now we'll bring it back — a 10% cancellation fee will be kept and the rest credited to your balance.״ — הסבר ידידותי עם נוסחת התמחור (10% / 90%).
+3. **Abandon order** — כפתור destructive באדום.
+4. **Stay** — כפתור cancel רגיל.
+5. **Start Session** — כפתור gradient במצב מוכן (מופיע ברקע, אבל הדיאלוג מעליו).
+
+הלוגיקה: `navigation.addListener('beforeRemove', ...)` תופס את ניסיון היציאה, מציג את ה-Alert, ורק לאחר אישור (״Abandon order״) ייקרא ל-`POST /orders/:id/abandon`. השרת מחשב את ה-10% / 90% מהסכום ששולם, מזכה את הקרדיט, ומחזיר את הרחפן.
 
 ### 4.9 LiveSessionScreen
 
-> **[תמונה: מסך סשן לייב — LiveSessionScreen]**
->
-> תיאור צפוי: בחצי העליון — placeholder ״Drone Camera Feed״ עם רקע gradient כהה ואייקון מצלמה. תווית REC אדומה פולסת בפינה. תווית שם החבילה בפינה השנייה. בחלק התחתון — StatusBadge ״Recording״, טיימר (0:23 / 0:60), ProgressBar, 4 שלבים: Take-off / Filming / Final Pass / Landing. בתחתית — קישור ״End Session Early״.
->
-> הדגשות:
-> - תווית REC + פולס
-> - תווית חבילה
-> - StatusBadge
-> - טיימר
-> - ProgressBar
-> - 4 שלבים
-> - כפתור End Session Early
+![LiveSessionScreen](assets/book/11_live.png)
+
+מסך הסשן הלייב. המסך נטען מיד אחרי לחיצה על ״Start Session״ ב-FlightTracking, ושולח אוטומטית `session:start` לשרת — מה שמעביר את הרחפן מ-ARRIVED ל-RECORDING.
+
+רכיבים:
+
+1. **REC badge** — אדום בפינה הימנית-עליונה של ה-feed. הנקודה פולסת ב-loop של 600ms (`Animated.loop`).
+2. **Sky View pill** — תווית פינה ימנית-עליונה של ה-feed, מציינת את שם החבילה (בא מ-`pkg.name`).
+3. **Drone Camera Feed placeholder** — gradient כהה עם אייקון video. בגרסת demo זה placeholder; בעתיד אפשר להכניס כאן live RTSP stream.
+4. **״Recording״ status badge** — מתחת ל-feed, מצב הרחפן הנוכחי.
+5. **טיימר** — ״0:02״ משמאל (זמן שעבר) ו-״6:58 remaining״ מימין (זמן שנותר). מבוסס על `pkg.durationSec` ועל אירועי `session:progress`.
+6. **ProgressBar** — bar צר שמתמלא ככל שהסשן מתקדם.
+7. **ארבעה שלבים** במעגלים:
+   - 🟦 **Take-off** (פעיל, כחול)
+   - ⬛ **Filming** (אייקון video, מחכה)
+   - ⬛ **Final Pass** (אייקון מצלמה, מחכה)
+   - ⬛ **Landing** (אייקון חץ למטה, מחכה)
+8. **End Session Early** — כפתור אדום עם אייקון stop-circle. בלחיצה — `sim.endSession(orderId)` נשלח, השרת מעביר ל-RETURNING, האפליקציה מנווטת ל-ContentDeliveryScreen.
+
+הקובץ: [src/screens/LiveSessionScreen.js](src/screens/LiveSessionScreen.js).
 
 ### 4.10 ContentDeliveryScreen
 
-> **[תמונה: מסך מסירת תוכן]**
->
-> תיאור צפוי: ראשית — אנימציית ספינר עם ״Processing Content…״. לאחר מסירה — מעגל ירוק עם וי, ״Content Delivered! 🎉״, רשימה אופקית של 3 thumbnails ראשונים, ו-״+N more״. כרטיס סיכום עם Order ID, מיקום, חבילה ומחיר. שני כפתורי gradient: View Gallery, Back to Home.
->
-> הדגשות:
-> - מצב Processing (לוגו ספינר)
-> - מצב Delivered (וי ירוק)
-> - 3 thumbnails + +N
-> - כרטיס סיכום
-> - 2 כפתורים
+![ContentDeliveryScreen — Delivered](assets/book/12_delivery.png)
+
+מסך מסירת התוכן במצב Delivered (אחרי שהרחפן חזר וההזמנה הושלמה). המסך מתחיל במצב Processing עם ספינר מסתובב; כשמגיע `order:delivered` socket event עם `media` — המסך מחליף ל-Delivered עם אנימציית spring scale.
+
+רכיבים:
+
+1. **Check circle** — עיגול ירוק גדול עם וי לבן במרכז. אנימציית Spring (תופעת קפיצה) מ-scale 0 ל-1.
+2. **כותרת** ״Content Delivered! 🎉״ עם אמוג'י קונפטי.
+3. **תת-כותרת** ״Your 25 photos & video are now in your gallery.״ (״25״ ו-״& video״ מועברים דינמית מ-`pkg.photos` ו-`pkg.video`).
+4. **שורת thumbnails** (FlatList אופקי) — 3 תמונות ראשונות מתוך ה-`media.photos`:
+   - תמונת עצים סתיו בפארק
+   - עץ גדול בכרי דשא
+   - יער ערפילי
+   ואחריהם — אריח **״+22 more״** (כי 25 − 3 = 22) ברקע ה-primary צבע, מסמן שיש עוד.
+5. **Summary card** — אטום, עם 3 שורות:
+   - 🧾 ״Order ORD-20260606-001״
+   - 📍 ״Live Location״
+   - 🎥 ״Sky View — $19.99״
+6. **שני כפתורי gradient**:
+   - **View Gallery** — אייקון images. מנווט לטאב Gallery.
+   - **Back to Home** — אייקון home. עושה `popToTop` למסך הבית.
+
+הקובץ: [src/screens/ContentDeliveryScreen.js](src/screens/ContentDeliveryScreen.js). הפונקציה `persistDelivery` נקראת ב-`useEffect` ושומרת את ההזמנה ל-`@airsnap_orders` וטוענת את התמונות ל-`@airsnap_gallery` ב-AsyncStorage — כך ש-Gallery ו-OrderHistory מציגים את התוכן מיד כשהמשתמש נכנס אליהם.
 
 ### 4.11 GalleryScreen
 
-> **[תמונה: מסך הגלריה — GalleryScreen]**
+> **[תמונה — לא צורפה. placeholder לעדכון עתידי]**
 >
-> תיאור צפוי: כותרת ״My Gallery״. שורת chip-ים: All / Photos / Videos. מתחת — masonry של תמונות ב-2 עמודות, גבהים מתחלפים. כל תמונה עם תאריך בפינה ואייקון play אם וידאו. מצב ריק: אייקון images-outline + ״No content yet״.
->
-> הדגשות:
-> - כותרת
-> - chip-ים של סינון
-> - masonry grid
-> - תווית תאריך + play icon
-> - modal של תצוגה מלאה (תמונה נפרדת)
+> תיאור: כותרת ״My Gallery״. שורת chip-ים: All / Photos / Videos. מתחת — masonry של תמונות ב-2 עמודות, גבהים מתחלפים. כל תמונה עם תאריך בפינה ואייקון play אם וידאו. לחיצה על תמונה פותחת modal במצב מסך מלא. מצב ריק: אייקון images-outline + ״No content yet״.
+
+הקובץ: [src/screens/GalleryScreen.js](src/screens/GalleryScreen.js).
 
 ### 4.12 OrderHistoryScreen
 
-> **[תמונה: מסך היסטוריית הזמנות]**
->
-> תיאור צפוי: כותרת ״Order History״. רשימת כרטיסים, כל כרטיס: Order ID + StatusBadge בראש. שורות עם אייקון תאריך, אייקון מיקום, אייקון פריצ׳נג (חבילה + מחיר). 3 thumbnails קטנים בתחתית. Pull-to-refresh.
->
-> הדגשות:
-> - כותרת
-> - כרטיס הזמנה
-> - StatusBadge
-> - שורות מידע
-> - שורת thumbnails
-> - מצב ריק (״No orders yet״)
+![OrderHistoryScreen](assets/book/15_history.png)
+
+מסך היסטוריית ההזמנות במצב light. צילום המסך מציג ארבע הזמנות מסופקות מ-6-7 ביוני 2026:
+
+1. **ORD-20260606-001** — Delivered (badge ירוק) — 2026-06-06 — Live Location — Sky View — $21.59 — 3 thumbnails (אותו תוכן של מסך ה-Delivery: עצי סתיו, עץ גדול, יער ערפילי).
+2. **ORD-20260606-004** — Delivered — 2026-06-06 — Live Location — Sky View — $19.99 — 3 thumbnails (פטריית fly agaric, ערכת מצלמות וינטג', שביל יער).
+3. **ORD-20260605-002** — Delivered — 2026-06-05 — Live Location — Quick Snap — $9.99 — 3 thumbnails (עצי סתיו, שביל יער, פטריית fly agaric).
+4. **ORD-20260605-001** — Delivered — 2026-06-05 — (חתוך בתחתית)
+
+לכל כרטיס יש את הרכיבים:
+
+- **Order ID** + **StatusBadge** ירוק ״Delivered״ בראש.
+- שורת תאריך עם אייקון calendar.
+- שורת מיקום עם אייקון location pin.
+- שורת חבילה ומחיר עם אייקון pricetag.
+- שורת thumbnails תחתונה — 3 תמונות ראשונות מתוך `media.photos`.
+
+המסך תומך ב-pull-to-refresh: ה-`load()` קורא קודם מ-AsyncStorage (`@airsnap_orders`) ואז מבצע `GET /orders` בשרת. המיזוג נעשה ב-Map לפי `order.id` — השרת מנצח לשדות שהוא מכיר; ה-cache משלים את החסר (חשוב לאחר deploy שמאפס את ה-in-memory של השרת).
+
+הקובץ: [src/screens/OrderHistoryScreen.js](src/screens/OrderHistoryScreen.js).
 
 ### 4.13 ProfileScreen
 
-> **[תמונה: מסך פרופיל — ProfileScreen]**
->
-> תיאור צפוי: כרטיס פרופיל בראש עם avatar (initials על gradient), שם, מייל. סקציה SETTINGS עם 2 toggles: Notifications, Dark Mode. שורת tabs: Overview / Partners. כרטיס תפריט תחת Overview: Credits & Referrals, Order History, My Gallery, Help & Support, Privacy & Terms. אם מנהל — בנוסף: Manage Hives (admin), Promo Codes (admin). בתחתית — כפתור Sign Out.
->
-> הדגשות:
-> - כרטיס פרופיל
-> - 2 toggles
-> - tab segmentation
-> - תפריט (גלוי/אדמין-בלבד)
-> - כפתור Sign Out
+מסך הפרופיל זמין בשלושה מצבים — תלוי בטאב הנבחר (Overview/Partners) ובמצב הנושא (Dark/Light). שלוש הוואריאציות מוצגות כאן.
+
+#### ProfileScreen — Overview tab (Dark Mode)
+
+![ProfileScreen — Overview Dark](assets/book/16_profile_overview_dark.png)
+
+טאב ה-Overview ב-dark mode. רכיבים:
+
+1. **כותרת** ״Personal Area״.
+2. **כרטיס פרופיל** — avatar עיגול עם gradient כחול-טורקיז ואות ״A״, שם ״Alon״, מייל ״akonk13579@gmail.com״.
+3. **SETTINGS** — כרטיס עם שני toggles:
+   - 🔔 **Notifications** (פעיל, מתג כחול)
+   - 🌙 **Dark Mode** (פעיל, מתג כחול) — האייקון משתנה בין moon (dark) ל-sun (light).
+4. **ACCOUNT** — header text.
+5. **Segmented tabs** — **Overview** (נבחר, רקע כחול שקוף) / Partners.
+6. **תפריט** (תחת Overview):
+   - 💰 **Credits & Referrals** (אייקון wallet בירוק)
+   - 🧾 **Order & Invoice History** (אייקון receipt בכחול)
+   - 🖼️ **My Gallery** (אייקון images בטורקיז)
+   - ❓ **Help & Support** (אייקון help בכחול)
+   - 🛡️ **Privacy & Terms** (אייקון shield בצהוב/אזהרה)
+
+(לא נראה בצילום — תחתית: כפתור Sign Out, ועבור מנהל — שני פריטי תפריט נוספים: ״Manage Hives (admin)״ ו-״Promo Codes (admin)״.)
+
+#### ProfileScreen — Overview tab (Light Mode)
+
+![ProfileScreen — Overview Light](assets/book/16b_profile_overview_light.png)
+
+אותו תוכן ב-light mode. ההבדלים העיקריים:
+
+- רקע לבן/אפור-בהיר
+- ה-toggle של Dark Mode במצב off; האייקון שלו הוא ☀️ sun כתום, והטקסט הוא ״Light Mode״
+- אייקוני התפריט מתעדפים בצבעי פסטל בהירים יותר על מנת לעבוד עם הרקע הבהיר
+- ה-segmentation: Overview מוצג עם רקע כחול בהיר (lavender)
+
+החלפת הנושאים נעשית ב-`ThemeContext.toggleTheme()` שמעדכן את כל הפלטה בכל קומפוננטה דרך `useTheme()`.
+
+#### ProfileScreen — Partners tab
+
+![ProfileScreen — Partners](assets/book/16c_profile_partners.png)
+
+לחיצה על ״Partners״ בטאבים מציגה את `PartnerTab`. רכיבים:
+
+1. **Partner Locations card** — כותרת + תת-כותרת ״Only sites within 500m are clickable for ordering.״
+2. **כרטיס שותף** עם תמונת רקע (אגם בהרים), שם המקום (״Har Adar״), דירוג כוכבים (״★ 5״), מרחק מהמשתמש (״0.15 km from you״), וכפתור פעולה ״Open →״ בכחול.
+3. **כפתור About our partners** — מנווט ל-PartnersAboutScreen.
+
+לחיצה על Open בודקת את ה-geofence המקומי (`haversineDistanceMeters(userCoords, site)`). אם בטווח של 500m — ניווט ל-`PackageSelectScreen` עם פרמטרים של אתר השותף. אם לא — Alert ״Out of range״.
+
+הקובץ: [src/screens/ProfileScreen.js](src/screens/ProfileScreen.js). הרכיב Partner: [src/components/Account/PartnerTab.js](src/components/Account/PartnerTab.js).
 
 ### 4.14 CreditsScreen
 
-> **[תמונה: מסך קרדיט — CreditsScreen]**
->
-> תיאור צפוי: hero gradient כחול-סגול בראש עם ״Available balance ₪5.00״ (או ״Unlimited״ למנהל). תחתיו — סקציה YOUR REFERRAL CODE: שדה לבן עם הקוד בן 6 תווים, כפתור Share עם אייקון share. סקציה REDEEM A CODE: שדה טקסט + כפתור Redeem. סקציה RECENT ACTIVITY: רשימה של ledger entries עם אייקון לפי סוג + תאריך + סכום.
->
-> הדגשות:
-> - balance hero
-> - sub-text (״Admin — orders are free״)
-> - referral code box
-> - כפתור Share
-> - שדה redeem + כפתור
-> - רשימת ledger entries
+![CreditsScreen — Admin](assets/book/17_credits.png)
+
+מסך הקרדיט במצב light, של חשבון מנהל (״Unlimited״). רכיבים:
+
+1. **Header** — חץ Back שמאלי + ״Credits״ ממורכז.
+2. **Balance hero** — כרטיס gradient כחול-טורקיז בולט:
+   - שורה עליונה: ״Available balance״ (לבן חצי-שקוף)
+   - שורה גדולה: **״Unlimited״** ב-bold (42pt, לבן)
+   - תת-שורה: ״Admin — orders are free״
+   
+   עבור משתמש רגיל היה כאן הסכום ב-₪ (למשל ״₪5.00״) ולא היה את התת-שורה.
+
+3. **YOUR REFERRAL CODE** — section header.
+   - תיבת קוד אפורה בהירה: ״**R98QB5**״ במרכז, fontWeight 800, letter-spacing 2pt.
+   - כפתור עיגול ירוק-טורקיז עם אייקון share. בלחיצה — `Share.share()` של React Native פותח את share sheet הילידי של מערכת ההפעלה עם ההודעה: ״Join me on AirSnap and we both win — use my code R98QB5 to sign up.״
+   - טקסט הסבר: ״When a friend signs up with your code and places their first paid order, you earn ₪20.״
+
+4. **REDEEM A CODE** — section header.
+   - שדה ״Enter code״ אפור בהיר.
+   - כפתור כחול ״Redeem״. בלחיצה — `POST /promos/redeem`. אם הקוד balance — הסכום נוסף ליתרה והרענון של ה-`me` יבוא דרך `refreshMe`. אם discount — Alert מסביר לפדות בתשלום.
+
+5. **RECENT ACTIVITY** — section header.
+   - כרטיס במצב ריק: ״No credit activity yet.״
+   - כשיש activity, יוצגו עד 10 רשומות אחרונות עם אייקון לפי סוג (sparkles ל-signup_bonus, people ל-referral_bonus, gift ל-promo_redeem, paper-plane ל-order_spend, arrow-undo ל-order refund), תאריך, וסכום בירוק/אדום (לפי כיוון).
+
+הקובץ: [src/screens/CreditsScreen.js](src/screens/CreditsScreen.js).
 
 ### 4.15 HiveAdminScreen
 
-> **[תמונה: מסך ניהול כוורות — HiveAdminScreen]**
->
-> תיאור צפוי: מפה במסך מלא עם המיקום הנוכחי וכל הכוורות (סמן custom עם אייקון business). מעגל delivery zone (צהוב, חצי-שקוף, 500m) סביב כל כוורת. bottom sheet עם handle bar למעלה, רשימה אופקית של כרטיסי כוורות (gradient רקע, mini pills של רחפנים בצבעים: ירוק=idle, כחול=flying, ציאן=charging, ענבר=סוללה נמוכה). לחיצה על המפה פותחת modal הוספה.
->
-> הדגשות:
-> - מפה עם כוורות
-> - מעגלי delivery zone
-> - bottom sheet handle
-> - כרטיס כוורת עם gradient
-> - mini drone pills (4 צבעים)
-> - modal הוספה (תמונה נפרדת)
-> - modal אישור מחיקה
+![HiveAdminScreen](assets/book/18_hive_admin.png)
+
+מסך ניהול הכוורות (אדמין). הצילום מציג את הר אדר עם כוורת אחת קיימת.
+
+רכיבים:
+
+1. **Header** — Back arrow + ״Manage Hives״ + תת-שורה ״1 hive · Tap map to add״.
+2. **המפה** — Apple Maps (אזור Har Adar/Al Qubeiba). מאפשרת לחיצה בכל מקום על המסך כדי להוסיף כוורת בנקודה שנגעת.
+3. **סמן הכוורת** — pin ירוק (״Har Adar״) במרכז המפה.
+4. **מעגל delivery zone** — מעגל צהוב חצי-שקוף ברדיוס 500m סביב הכוורת. עוזר למנהל להבין איפה התפיסה של הכוורת.
+5. **נקודת המשתמש** — נקודה כחולה native של iOS.
+6. **כפתור Place at my location** — gradient כחול-טורקיז במרכז. shortcut להוספת כוורת במיקום הנוכחי בלי לדייק לחיצה במפה.
+7. **Bottom sheet — ACTIVE FLEET**:
+   - **Har Adar card** — gradient כחול עם אייקון building, ״**1/1**״ pill (1 רחפן זמין מתוך 1 בצי), ״**100%**״ pill ירוק (סוללה ממוצעת), קואורדינטות ״31.829, 35.129״, וכפתור **Delete hive** באדום.
+
+(לא נראים בצילום אך קיימים בקוד:)
+
+- **Create modal** — נפתח בלחיצה על המפה. שדה ״Hive name״ עם default ״Hive #N״. כפתורי Cancel/Create. לאחר Create — `POST /hives` שמחזיר `{ hive, merged }`. אם merged=true (כוורת ב-25m קיים) — `hive:updated` socket event יוצא; אם merged=false — `hive:created`.
+- **Delete confirmation modal** — לפני המחיקה בפועל.
+
+הקובץ: [src/screens/HiveAdminScreen.js](src/screens/HiveAdminScreen.js).
 
 ### 4.16 PromoCodeAdminScreen
 
-> **[תמונה: מסך ניהול קופונים — PromoCodeAdminScreen (locked)]**
->
-> תיאור צפוי (מצב נעול): רקע מטושטש (BlurView). כרטיס מרכזי עם מעגל gradient עם אייקון מנעול, כותרת ״Admin Passcode״, תת-כותרת, שדה passcode (secureTextEntry), כפתור gradient ״Unlock״.
->
-> **[תמונה: מסך ניהול קופונים — PromoCodeAdminScreen (unlocked)]**
->
-> תיאור צפוי (מצב פתוח): שורת כותרת ״N codes״ + כפתור עגול ״+ New״. רשימת כרטיסים: קוד גדול, type chip (balance ירוק / discount תכלת), שורת תיאור (״₪20 added to balance״), שורת metadata (״3/100 redeemed • Dec 31 • one per user״) + כפתור Deactivate. כרטיסים inactive מוצגים מטושטשים. מצב ריק עם איקון ticket.
->
-> **[תמונה: modal יצירת קופון]**
->
-> תיאור צפוי: bottom-sheet modal, כותרת ״New promo code״, שדה Code (UPPERCASE), 2 pills של type, שדה Amount (₪), זוג שדות Max redemptions + Expires (days), Switch ״One per user״, שני כפתורים: Cancel + ״Create code״.
+> **[שלוש תמונות — לא צורפו. placeholders לעדכון עתידי]**
+
+#### מצב נעול (passcode prompt)
+
+רקע מטושטש (BlurView). כרטיס מרכזי עם מעגל gradient + אייקון מנעול, כותרת ״Admin Passcode״, תת-כותרת ״Enter the passcode to manage promo codes.״, שדה passcode (secureTextEntry, ממורכז), כפתור gradient ״Unlock״. המשתמש מקליד ״Alon132״ (שווה ל-`ADMIN_PROMO_PASS` ב-firebaseConfig וב-env של השרת); הקליינט בודק מקומית ואז שולח את אותה הסיסמה ב-`X-Admin-Pass` header של `GET /admin/promos`. אם השרת מסכים — המסך נפתח.
+
+#### מצב פתוח (רשימת קודים)
+
+שורת כותרת: ״N codes״ + כפתור עגול כחול ״+ New״. רשימת כרטיסים, כל אחד מכיל:
+
+- שורה עליונה: קוד גדול ב-letter-spacing + type chip (balance ירוק / discount טורקיז).
+- שורת תיאור: ״₪X added to balance״ או ״₪X off next order״.
+- שורת metadata: ״N/M redeemed • <expiry> • one per user״.
+- כפתור Deactivate באדום (אם פעיל), או label inactive (אם לא).
+
+קודים inactive מוצגים בשקיפות 55% כדי לסמן.
+
+#### Modal יצירת קופון
+
+Bottom sheet modal עם:
+
+- כותרת ״New promo code״
+- שדה ״Code״ (UPPERCASE, validation מקומי: 3-32 תווים, A-Z 0-9 _ -)
+- שני pills של type: ״Add to balance״ / ״Order discount״
+- שדה ״Amount (₪)״
+- שני שדות בצד: ״Max redemptions״ + ״Expires (days)״
+- Switch ״One per user״ (default on)
+- שני כפתורים: Cancel + ״Create code״ gradient
+
+הקובץ: [src/screens/PromoCodeAdminScreen.js](src/screens/PromoCodeAdminScreen.js).
 
 ### 4.17 ויזואליזציית web
 
-> **[תמונה: ויזואליזציית web — דף הבית של השרת]**
+> **[תמונה — לא צורפה. placeholder לעדכון עתידי]**
 >
-> תיאור צפוי: כותרת AirSnap בראש עם תת-כותרת ״Live Demo״. מפה leaflet ברוב המסך עם CartoDB Voyager Dark tiles. סמני כוורות עם טבעות סוללה. סמני רחפנים עם רוטורים מסתובבים. שבילי טיסה צבועים gradient. בצד ימין — Fleet card (total / idle / flying / charging / avg battery), כרטיסי per-hive עם drone pills, וכרטיס Active Orders.
+> נגישה דרך הדפדפן בכתובת `https://airsnap-faeg.onrender.com/`. רכיבים:
 >
-> הדגשות:
-> - כותרת + subtitle
-> - מפה כהה
-> - סמני כוורות (battery rings)
-> - סמני רחפנים (רוטורים)
-> - שבילי טיסה
-> - Right panel: Fleet card
-> - per-hive cards
-> - Active orders
+> - כותרת ״AirSnap״ + subtitle ״Live Demo״
+> - מפה Leaflet במסך מלא עם tile layer **CartoDB Voyager Dark** (חינם, בלי API key)
+> - סמני כוורות SVG משושה עם **טבעת battery** סביב הפרימטר (conic-gradient לפי ממוצע סוללת הצי). פולס cyan כשרחפן בכוורת בטעינה.
+> - סמני רחפנים SVG quadcopter עם **רוטורים מסתובבים** (CSS @keyframes spin). הצבע משתנה לכתום-ענבר כשהסוללה מתחת ל-40%.
+> - שבילי טיסה — קווים עבים עם glow filter ו-gradient לפי טריות (בהיר→דהוי).
+> - **Right panel** (כרטיסי מידע מצד ימין):
+>   - **Fleet card** עליון: סה״כ רחפנים, idle / flying / charging counts, ממוצע סוללה.
+>   - **per-hive cards**: שם הכוורת ורשימת הרחפנים כ-pills צבעוניים.
+>   - **Active orders card**: רשימת ההזמנות בטיסה כעת.
+>
+> הויזואליזציה מתחברת ל-Socket.IO של אותו שרת, שולחת `hello:viewer`, ומקבלת את כל אירועי ה-state בלי authentication (read-only).
+
+הקבצים: [airsnap-server/public/index.html](airsnap-server/public/index.html) ו-[airsnap-server/public/sim.js](airsnap-server/public/sim.js).
 
 ---
 
@@ -1491,7 +1625,7 @@ Profile → ״Promo Codes (admin)״ → הזן את הסיסמה ״Alon132״ ו�
 
 הקוד, התיעוד, העיצוב והנכסים בפרויקט זה (להלן ״הפרויקט״) הם רכושם הבלעדי של:
 
-1. **[שם המשתמש המלא]** — מפתח ראשי.
+1. **אלון כתב** — מפתח ראשי.
 2. סטארטאפ **AirSnap**, אשר נוסד על ידי סטודנטים מאוניברסיטת רייכמן.
 
 אסור להעתיק, להפיץ, לשנות, לתרגם, להחכיר, למכור, או להשתמש בקוד או בנכסים אלה, באופן מלא או חלקי, ללא רשות מפורשת בכתב מאחד מבעלי הזכויות הנ״ל.
