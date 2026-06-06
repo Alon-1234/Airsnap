@@ -84,6 +84,10 @@ export const simApi = {
   confirmPayment: (orderId) =>
     request('POST', `/orders/${encodeURIComponent(orderId)}/confirm-payment`, null, { auth: true }),
 
+  // ── Abandon order (drone in PENDING/EN_ROUTE/ARRIVED only) ─
+  abandonOrder: (orderId) =>
+    request('POST', `/orders/${encodeURIComponent(orderId)}/abandon`, null, { auth: true }),
+
   // ── Admin promo management ─────────────────────────────
   // adminPass is the X-Admin-Pass header value (passcode entered in the
   // mobile gate). Server enforces it independently.

@@ -42,24 +42,31 @@ function formatBalance(me) {
   return `₪${v.toFixed(2)}`;
 }
 
-function ledgerIcon(type) {
+function ledgerIcon(type, reason) {
   switch (type) {
     case 'signup_bonus':   return { icon: 'sparkles',     color: '#F2C744' };
     case 'referral_bonus': return { icon: 'people',       color: '#5BC0EB' };
     case 'promo_redeem':   return { icon: 'gift',         color: '#A076F9' };
     case 'order_spend':    return { icon: 'paper-plane',  color: '#FF8A65' };
-    case 'admin_adjust':   return { icon: 'construct',    color: '#9E9E9E' };
+    case 'admin_adjust':
+      // adminAdjust is also used for abandon-order refunds — surface them as such.
+      if (reason && /refund|abandon/i.test(reason)) {
+        return { icon: 'arrow-undo', color: '#5BC0EB' };
+      }
+      return { icon: 'construct', color: '#9E9E9E' };
     default:               return { icon: 'wallet',       color: '#9E9E9E' };
   }
 }
 
-function ledgerLabel(type) {
+function ledgerLabel(type, reason) {
   switch (type) {
     case 'signup_bonus':   return 'Welcome bonus';
     case 'referral_bonus': return 'Referral bonus';
     case 'promo_redeem':   return 'Promo code';
     case 'order_spend':    return 'Order payment';
-    case 'admin_adjust':   return 'Adjustment';
+    case 'admin_adjust':
+      if (reason && /refund|abandon/i.test(reason)) return 'Order refund';
+      return 'Adjustment';
     default:               return type;
   }
 }
@@ -205,7 +212,7 @@ export default function CreditsScreen({ navigation }) {
           </Text>
         ) : (
           ledger.slice(0, 10).map((entry) => {
-            const meta = ledgerIcon(entry.type);
+            const meta = ledgerIcon(entry.type, entry.reason);
             const isCredit = (entry.amount || 0) >= 0;
             return (
               <View key={entry.id} style={ds.ledgerRow}>
@@ -214,7 +221,7 @@ export default function CreditsScreen({ navigation }) {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[Typography.bodySemibold, { color: colors.textPrimary }]}>
-                    {ledgerLabel(entry.type)}
+                    {ledgerLabel(entry.type, entry.reason)}
                   </Text>
                   <Text style={[Typography.caption, { color: colors.textMuted }]}>
                     {formatDate(entry.createdAt)}

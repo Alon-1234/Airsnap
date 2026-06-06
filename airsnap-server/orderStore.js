@@ -56,6 +56,9 @@ function createOrder({
     promoCode,
     promoDiscount,
     paidAt: paymentStatus === 'paid' ? Date.now() : null,
+    abandonedAt: null,
+    cancellationFee: 0,
+    refundAmount: 0,
     media: null,
     deliveredAt: null,
     createdAt: Date.now(),
@@ -84,6 +87,20 @@ function markDelivered(id, media) {
   return order;
 }
 
+/**
+ * Marks the order as abandoned, stamping the cancellation fee + refund
+ * amount that were already applied to the user's balance.
+ */
+function markAbandoned(id, { cancellationFee, refundAmount }) {
+  const order = orders.get(id);
+  if (!order) return null;
+  order.abandonedAt = Date.now();
+  order.cancellationFee = cancellationFee;
+  order.refundAmount = refundAmount;
+  order.paymentStatus = 'refunded';
+  return order;
+}
+
 function listOrdersForUser(userId, { onlyDelivered = false } = {}) {
   const out = [];
   for (const order of orders.values()) {
@@ -103,6 +120,7 @@ module.exports = {
   getOrder,
   setPaymentStatus,
   markDelivered,
+  markAbandoned,
   listOrdersForUser,
   listActiveOrderIds,
   genOrderId,

@@ -64,6 +64,7 @@ const { splitPayment, round2 } = require('./credits');
 
 const PORT = Number(process.env.PORT) || 4000;
 const DELIVERY_ZONE_RADIUS_METERS = 500;
+const ABANDON_FEE_FRACTION = 0.10;     // 10% cancellation fee
 
 // ── Express app ──────────────────────────────────────────
 const app = express();
@@ -438,6 +439,86 @@ app.post('/orders/:id/confirm-payment', requireAuth, async (req, res) => {
 });
 
 /**
+ * Abandon an order BEFORE recording starts (drone is still en-route or
+ * hovering at the customer waiting for the "Start Session" tap).
+ *
+ * Charges a 10% cancellation fee on the amount already paid; refunds
+ * the remaining 90% to the user's credit balance (regardless of original
+ * payment method — for the stop-gap card flow we treat any card portion
+ * as goodwill credit).
+ *
+ * No-ops with 409 if the drone is already recording, returning, or done.
+ */
+app.post('/orders/:id/abandon', requireAuth, async (req, res) => {
+  const order = orderStore.getOrder(req.params.id);
+  if (!order) return res.status(404).json({ error: 'Order not found' });
+  if (order.userId !== req.user.uid) return res.status(403).json({ error: 'Not your order' });
+  if (order.abandonedAt) {
+    return res.status(409).json({ error: 'Order already abandoned' });
+  }
+  if (order.deliveredAt) {
+    return res.status(409).json({ error: 'Order already delivered' });
+  }
+
+  const drone = drones.get(order.id);
+  if (!drone) {
+    return res.status(409).json({ error: 'No active drone for this order' });
+  }
+  const abandoned = drone.abandonBeforeRecording();
+  if (!abandoned) {
+    return res.status(409).json({
+      error: 'Too late — the session has already started or the drone is on its way back.',
+      status: drone.status,
+    });
+  }
+
+  // Compute fee on the amount already paid. For orders where cardCharge
+  // hasn't cleared yet (paymentStatus !== 'paid'), only the credit portion
+  // counts as paid — the card was never captured.
+  const paidTotal = order.paymentStatus === 'paid'
+    ? round2((order.creditsApplied || 0) + (order.cardCharge || 0))
+    : round2(order.creditsApplied || 0);
+
+  const cancellationFee = round2(paidTotal * ABANDON_FEE_FRACTION);
+  const refundAmount = round2(paidTotal - cancellationFee);
+
+  let newBalance = null;
+  if (refundAmount > 0 && !req.user.isAdmin) {
+    try {
+      newBalance = await userStore.adminAdjust(
+        req.user.uid,
+        refundAmount,
+        `Refund (90%) — order ${order.id} abandoned`,
+        'system',
+      );
+    } catch (e) {
+      // The drone is already heading home; we still want to mark the order
+      // abandoned so callers don't retry forever. Log and proceed.
+      console.warn(`[abandon] refund failed for ${order.id}:`, e.message);
+    }
+  }
+
+  orderStore.markAbandoned(order.id, { cancellationFee, refundAmount });
+  io.to(`order:${order.id}`).emit('order:abandoned', {
+    orderId: order.id,
+    cancellationFee,
+    refundAmount,
+  });
+  io.to('viewers').emit('order:abandoned', {
+    orderId: order.id,
+    cancellationFee,
+    refundAmount,
+  });
+  res.json({
+    ok: true,
+    cancellationFee,
+    refundAmount,
+    newBalance,
+    feeFraction: ABANDON_FEE_FRACTION,
+  });
+});
+
+/**
  * Meshulam will POST here when a card charge clears. Scaffolded — not
  * yet wired. Verify signature when the integration lands.
  */
@@ -507,6 +588,14 @@ function startDroneForOrder(order, startBattery) {
   const watcher = setInterval(() => {
     if (drone.status === STATUS.DELIVERED) {
       clearInterval(watcher);
+      const current = orderStore.getOrder(order.id);
+      if (current?.abandonedAt) {
+        // Abandoned order — drone flew home empty. No media, no delivery
+        // event, just free up the hive slot.
+        releaseHiveSlot(drone.battery);
+        setTimeout(() => drones.delete(order.id), 5000);
+        return;
+      }
       const media = pickMedia(order.package);
       orderStore.markDelivered(order.id, media);
       const deliveredPayload = { orderId: order.id, media, deliveredAt: Date.now() };

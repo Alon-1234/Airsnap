@@ -122,6 +122,26 @@ class Drone {
     this._emitStatus('Session ended early — returning to hive');
   }
 
+  /**
+   * User abandoned the order before recording started — drone is
+   * still on the way OR hovering at the customer waiting for the
+   * "Start Session" tap. Forces the drone to fly home without
+   * recording anything. Allowed in PENDING / EN_ROUTE / ARRIVED.
+   * No-op once recording has started or the drone is heading back.
+   */
+  abandonBeforeRecording() {
+    if (
+      this.status !== STATUS.PENDING &&
+      this.status !== STATUS.EN_ROUTE &&
+      this.status !== STATUS.ARRIVED
+    ) {
+      return false;
+    }
+    this.status = STATUS.RETURNING;
+    this._emitStatus('Order abandoned — returning to hive');
+    return true;
+  }
+
   // ── Snapshots ──
   snapshot() {
     const ll = enuMetersToLatLng(this.hive, { east: this.pos.east, north: this.pos.north });

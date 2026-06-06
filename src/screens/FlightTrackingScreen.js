@@ -13,15 +13,15 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated } from 'react-native';
+import { View, Text, StyleSheet, Animated, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { ScreenWrapper, Card, StatusBadge, GradientButton } from '../components/common';
-import { useTheme } from '../context';
+import { useTheme, useAuth } from '../context';
 import { Typography, Spacing } from '../theme';
 import { DRONE_STATUS } from '../constants';
-import { getSimClient } from '../services/SimClient';
+import { getSimClient, simApi } from '../services/SimClient';
 
 const TIMELINE = [
   { key: 'dispatch', label: 'Assigning Drone',     statuses: [DRONE_STATUS.PENDING] },
@@ -38,10 +38,15 @@ export default function FlightTrackingScreen({ navigation, route }) {
   const { latitude, longitude, siteName, package: pkg, orderId, hive } = route.params;
 
   const { colors } = useTheme();
+  const { refreshMe } = useAuth();
   const styles = dynamicStyles(colors);
 
   const [droneState, setDroneState] = useState(null);
   const [currentStatus, setCurrentStatus] = useState(DRONE_STATUS.PENDING);
+  // Tracks whether the user has chosen to abandon — once true, we let the
+  // navigation through without re-prompting (or once recording starts and
+  // we're on our way to LiveSession, also let it through).
+  const allowLeaveRef = useRef(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   // ── Subscribe to drone state for this order ─────────────
@@ -81,6 +86,58 @@ export default function FlightTrackingScreen({ navigation, route }) {
     return () => pulse.stop();
   }, [pulseAnim]);
 
+  // ── Intercept back navigation: confirm + abandon w/ 10% fee ──
+  // Without this, leaving the screen while the drone is still en-route
+  // or hovering at the customer leaves the hive slot locked until the
+  // drone returns on its own — blocking any new order.
+  useEffect(() => {
+    const sub = navigation.addListener('beforeRemove', (e) => {
+      // 1. We've already decided to let this nav through.
+      if (allowLeaveRef.current) return;
+      // 2. Forward navigation (Start Session, auto-complete) is fine.
+      if (e.data.action.type !== 'GO_BACK' && e.data.action.type !== 'POP') return;
+      // 3. Drone is past the point of abandonment — let it through.
+      const safeToLeave = [
+        DRONE_STATUS.RECORDING,
+        DRONE_STATUS.RETURNING,
+        DRONE_STATUS.PROCESSING,
+        DRONE_STATUS.DELIVERED,
+      ];
+      if (safeToLeave.includes(currentStatus)) return;
+
+      e.preventDefault();
+      Alert.alert(
+        'Abandon this order?',
+        'The drone is still on its way (or waiting for you to start). ' +
+        'If you leave now we\'ll bring it back — a 10% cancellation fee will be ' +
+        'kept and the rest credited to your balance.',
+        [
+          { text: 'Stay', style: 'cancel' },
+          {
+            text: 'Abandon order',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const res = await simApi.abandonOrder(orderId);
+                refreshMe();
+                allowLeaveRef.current = true;
+                Alert.alert(
+                  'Order abandoned',
+                  `Cancellation fee: ₪${Number(res.cancellationFee || 0).toFixed(2)}.\n` +
+                  `Refunded to credits: ₪${Number(res.refundAmount || 0).toFixed(2)}.`,
+                  [{ text: 'OK', onPress: () => navigation.dispatch(e.data.action) }],
+                );
+              } catch (err) {
+                Alert.alert('Could not abandon', err.message || 'Unknown error');
+              }
+            },
+          },
+        ],
+      );
+    });
+    return sub;
+  }, [navigation, currentStatus, orderId, refreshMe]);
+
   // ── Derived view-model from server state ────────────────
   const etaSec = droneState?.etaSec ?? 0;
   const distanceMeters = droneState?.distanceMeters ?? 0;
@@ -90,6 +147,7 @@ export default function FlightTrackingScreen({ navigation, route }) {
   const showStart = currentStatus === DRONE_STATUS.ARRIVED;
 
   const handleStartSession = () => {
+    allowLeaveRef.current = true;
     navigation.navigate('LiveSession', {
       latitude,
       longitude,
