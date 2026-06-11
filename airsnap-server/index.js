@@ -685,6 +685,14 @@ try {
   console.warn('[boot] Auth-gated routes will return 500 until FIREBASE_PROJECT_ID is set.');
 }
 
+// Restore hives placed before the last restart (Render free tier
+// restarts on deploys and idle spin-down). Never blocks boot.
+hiveStore.loadPersistedHives().then((count) => {
+  if (count > 0) {
+    io.to('viewers').emit('hives:snapshot', { hives: hiveStore.listHives() });
+  }
+});
+
 server.listen(PORT, () => {
   console.log(`[airsnap-server] listening on :${PORT}`);
   console.log(`[airsnap-server] open http://localhost:${PORT} for the live map`);

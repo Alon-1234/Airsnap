@@ -203,13 +203,115 @@
     rerender();
   }
 
+  // ── Drone FPV camera (click a drone to open) ───────────
+  let camMap = null;
+  let camOrderId = null;
+  let lastCamUpdate = 0;
+  const camEl = document.getElementById('dronecam');
+  const camMapEl = document.getElementById('cam-map');
+
+  function bearingDeg(from, to) {
+    const dLng = ((to.longitude - from.longitude) * Math.PI) / 180;
+    const lat1 = (from.latitude * Math.PI) / 180;
+    const lat2 = (to.latitude * Math.PI) / 180;
+    const y = Math.sin(dLng) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+    return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+  }
+
+  function pointAhead(pos, headingDegrees, meters) {
+    const h = (headingDegrees * Math.PI) / 180;
+    return {
+      latitude: pos.latitude + (meters * Math.cos(h)) / 111320,
+      longitude: pos.longitude + (meters * Math.sin(h)) / (111320 * Math.cos((pos.latitude * Math.PI) / 180)),
+    };
+  }
+
+  function openDroneCam(orderId) {
+    camOrderId = orderId;
+    camEl.classList.remove('hidden');
+    if (!camMap) {
+      camMap = L.map('cam-map', {
+        zoomControl: false,
+        attributionControl: false,
+        dragging: false,
+        scrollWheelZoom: false,
+        doubleClickZoom: false,
+        boxZoom: false,
+        keyboard: false,
+        touchZoom: false,
+        fadeAnimation: false,
+        zoomAnimation: false,
+        markerZoomAnimation: false,
+        inertia: false,
+      });
+      // Real satellite imagery — same source the app's photos use.
+      L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 19 }
+      ).addTo(camMap);
+    }
+    setTimeout(() => camMap.invalidateSize(), 50);
+    const entry = drones.get(orderId);
+    if (entry && entry.lastState) updateDroneCam(entry.lastState, true);
+  }
+
+  function closeDroneCam() {
+    camOrderId = null;
+    camEl.classList.add('hidden');
+  }
+  document.getElementById('cam-close').addEventListener('click', closeDroneCam);
+
+  function updateDroneCam(state, force) {
+    if (!camMap || state.orderId !== camOrderId || !state.position) return;
+    const now = Date.now();
+    if (!force && now - lastCamUpdate < 100) return;
+    lastCamUpdate = now;
+
+    const pos = state.position;
+    const onSite =
+      (state.status === 'arrived' || state.status === 'recording') && state.target;
+    let center, headingDegrees, zoom;
+    if (onSite) {
+      // Orbit shot: lock onto the subject, camera circles with the drone.
+      center = [state.target.latitude, state.target.longitude];
+      headingDegrees = bearingDeg(pos, state.target);
+      zoom = 19;
+    } else {
+      // Chase cam: look down-range along the direction of travel.
+      headingDegrees = (((state.heading || 0) * 180) / Math.PI + 360) % 360;
+      const ahead = pointAhead(pos, headingDegrees, 120);
+      center = [ahead.latitude, ahead.longitude];
+      zoom = 17;
+    }
+    camMap.setView(center, zoom, { animate: false });
+    camMapEl.style.transform = 'rotate(' + -headingDegrees + 'deg)';
+
+    // HUD
+    const recording = state.status === 'recording';
+    document.getElementById('cam-rec').classList.toggle('recording', recording);
+    document.getElementById('cam-rec-label').textContent = recording ? 'REC' : 'LIVE';
+    document.getElementById('cam-status').textContent =
+      (state.status || '').replace('_', ' ').toUpperCase();
+    document.getElementById('cam-bat').textContent = Math.round(state.battery || 0) + '%';
+    document.getElementById('cam-alt').textContent = 'ALT ' + (pos.altitude || 0).toFixed(0) + 'M';
+    document.getElementById('cam-spd').textContent = 'SPD ' + ((state.speed || 0) * 3.6).toFixed(0) + 'KM/H';
+    document.getElementById('cam-hdg').textContent = 'HDG ' + headingDegrees.toFixed(0) + '°';
+    document.getElementById('cam-order').textContent = state.orderId || '';
+
+    if (state.status === 'delivered') closeDroneCam();
+  }
+
   // ── Drone rendering ─────────────────────────────────────
   function upsertDrone(state) {
     if (!state?.position) return;
     const ll = [state.position.latitude, state.position.longitude];
     let entry = drones.get(state.orderId);
     if (!entry) {
-      const marker = L.marker(ll, { icon: makeDroneIcon(state) }).addTo(map);
+      const marker = L.marker(ll, { icon: makeDroneIcon(state) })
+        .bindTooltip('Click for live camera', { direction: 'top' })
+        .addTo(map);
+      marker.on('click', () => openDroneCam(state.orderId));
       const trail = L.polyline([ll], { color: '#4F8EF7', weight: 3, opacity: 0.8 }).addTo(map);
       const line = L.polyline([ll, ll], { color: '#00C7FF', weight: 1.5, opacity: 0.5, dashArray: '4,4' }).addTo(map);
       entry = { marker, trail, line, lastState: state, trailPoints: [ll] };
@@ -230,9 +332,12 @@
       }
     }
 
+    updateDroneCam(state);
+
     if (state.status === 'delivered') {
       setTimeout(() => {
         if (!entry) return;
+        if (camOrderId === state.orderId) closeDroneCam();
         map.removeLayer(entry.marker);
         map.removeLayer(entry.trail);
         map.removeLayer(entry.line);

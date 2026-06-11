@@ -15,10 +15,20 @@
  *  startChargingTick) — it advances battery on every 'charging'
  *  drone and flips it to 'idle' when full. Returns the IDs of
  *  hives that changed so the caller can broadcast updates.
+ *
+ *  Persistence: hive STRUCTURE (name, location, drone count) is
+ *  mirrored to the Firestore `hives` collection so hives survive
+ *  server restarts (Render free tier restarts on every deploy
+ *  and idle spin-down). Runtime state (battery, flying/charging)
+ *  is not persisted — after a restart every drone wakes up idle
+ *  at 100%. Call loadPersistedHives() once at boot.
  * ============================================================
  */
 
 const { haversineDistanceMeters } = require('./geofence');
+const { getDb } = require('./auth');
+
+const PERSIST_COLLECTION = 'hives';
 
 const hives = new Map();
 let nextHiveId = 1;
@@ -42,6 +52,74 @@ function computeAvailable(hive) {
   return hive.drones.filter(
     (d) => d.status === 'idle' && d.battery >= MIN_DEPLOY_BATTERY
   ).length;
+}
+
+// ── Firestore persistence (fire-and-forget) ──────────────
+function persistHive(hive) {
+  try {
+    getDb()
+      .collection(PERSIST_COLLECTION)
+      .doc(hive.id)
+      .set({
+        id: hive.id,
+        name: hive.name,
+        latitude: hive.latitude,
+        longitude: hive.longitude,
+        droneCount: hive.drones.length,
+        createdAt: hive.createdAt,
+        createdBy: hive.createdBy || 'admin',
+      })
+      .catch((err) => console.warn('[hives] persist failed:', err.message));
+  } catch (err) {
+    console.warn('[hives] persist skipped:', err.message);
+  }
+}
+
+function removePersistedHive(id) {
+  try {
+    getDb()
+      .collection(PERSIST_COLLECTION)
+      .doc(id)
+      .delete()
+      .catch((err) => console.warn('[hives] unpersist failed:', err.message));
+  } catch (err) {
+    console.warn('[hives] unpersist skipped:', err.message);
+  }
+}
+
+/**
+ * Restore hives from Firestore at boot. Drones come back idle at
+ * 100% battery. Never throws — a server without Firestore creds
+ * just runs in-memory like before.
+ */
+async function loadPersistedHives() {
+  try {
+    const snap = await getDb().collection(PERSIST_COLLECTION).get();
+    let count = 0;
+    for (const doc of snap.docs) {
+      const data = doc.data() || {};
+      if (typeof data.latitude !== 'number' || typeof data.longitude !== 'number') continue;
+      const id = data.id || doc.id;
+      if (hives.has(id)) continue;
+      const droneCount = Math.max(1, Math.min(50, Math.round(data.droneCount || 1)));
+      hives.set(id, {
+        id,
+        name: (data.name || 'Hive').toString().slice(0, 80),
+        latitude: data.latitude,
+        longitude: data.longitude,
+        drones: Array.from({ length: droneCount }, (_, i) => makeDrone(id, i + 1)),
+        createdAt: data.createdAt || Date.now(),
+        updatedAt: Date.now(),
+        createdBy: data.createdBy || 'admin',
+      });
+      count += 1;
+    }
+    console.log(`[hives] restored ${count} hive(s) from Firestore`);
+    return count;
+  } catch (err) {
+    console.warn('[hives] restore failed (continuing in-memory):', err.message);
+    return 0;
+  }
 }
 
 /**
@@ -79,6 +157,7 @@ function createHive({ name, latitude, longitude, createdBy }) {
     if (d <= MERGE_RADIUS_METERS) {
       existing.drones.push(makeDrone(existing.id, existing.drones.length + 1));
       existing.updatedAt = Date.now();
+      persistHive(existing);
       return { hive: snapshot(existing), merged: true };
     }
   }
@@ -95,10 +174,15 @@ function createHive({ name, latitude, longitude, createdBy }) {
     createdBy: createdBy || 'admin',
   };
   hives.set(id, hive);
+  persistHive(hive);
   return { hive: snapshot(hive), merged: false };
 }
 
-function deleteHive(id) { return hives.delete(id); }
+function deleteHive(id) {
+  const existed = hives.delete(id);
+  if (existed) removePersistedHive(id);
+  return existed;
+}
 function getHive(id)   { return snapshot(hives.get(id)); }
 function listHives()    { return Array.from(hives.values()).map(snapshot); }
 
@@ -199,6 +283,7 @@ module.exports = {
   deleteHive,
   getHive,
   listHives,
+  loadPersistedHives,
   reserveDrone,
   releaseDrone,
   tickCharging,

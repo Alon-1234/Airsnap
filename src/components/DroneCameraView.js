@@ -5,13 +5,18 @@
  *  Simulated FPV feed: "what the drone sees right now."
  *
  *  A gesture-locked satellite MapView is flown programmatically
- *  from the live drone:state stream — camera centered on the
- *  drone, rotated to its heading, eye-height derived from its
- *  altitude. A DJI-style HUD (REC badge, telemetry strip,
- *  crosshair, corner brackets) is layered on top.
+ *  from the live drone:state stream, like a gimbal camera:
  *
- *  Used full-screen from FlightTrackingScreen (pass onClose)
- *  and inline in LiveSessionScreen (no onClose).
+ *    • Transit (en-route / returning) — low chase cam: centered
+ *      ahead of the drone along its heading, tilted forward.
+ *    • On-site (arrived / recording) — flyby/orbit shot: the
+ *      camera locks onto the SUBJECT (the user's location) and
+ *      circles it close-up as the drone orbits, exactly like a
+ *      DJI point-of-interest orbit.
+ *
+ *  Letterbox bars + edge vignette + a DJI-style HUD sell the
+ *  footage look. Used full-screen from FlightTrackingScreen
+ *  (pass onClose) and inline in LiveSessionScreen (no onClose).
  *
  *  The camera is driven via mapRef.animateCamera() — never a
  *  live `camera` prop, which would re-set the camera every
@@ -22,6 +27,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
 import MapView from 'react-native-maps';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
 import { DRONE_STATUS } from '../constants';
@@ -33,14 +39,61 @@ const MIN_ANIM_GAP_MS = 120;   // throttle camera moves to ~8 Hz
 const ANIM_DURATION_MS = 130;  // slightly over the gap so motion is continuous
 
 const radToDeg = (rad) => ((rad * 180) / Math.PI + 360) % 360;
+const degToRad = (deg) => (deg * Math.PI) / 180;
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
-// Map drone altitude (m) to camera eye height. Below ~250 m the
-// imagery over-zooms into blur; ×8 keeps climbs/descents visible.
-const camAltitudeFor = (alt) => clamp((alt || 0) * 8, 250, 900);
+// Compass bearing (degrees) from one lat/lng to another.
+function bearingDeg(from, to) {
+  const dLng = degToRad(to.longitude - from.longitude);
+  const lat1 = degToRad(from.latitude);
+  const lat2 = degToRad(to.latitude);
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return (radToDeg(Math.atan2(y, x)) + 360) % 360;
+}
 
-const pitchFor = (status) =>
-  status === DRONE_STATUS.ARRIVED || status === DRONE_STATUS.RECORDING ? 50 : 60;
+// Project a point `meters` ahead of `pos` along `headingDegrees`.
+function pointAhead(pos, headingDegrees, meters) {
+  const h = degToRad(headingDegrees);
+  return {
+    latitude: pos.latitude + (meters * Math.cos(h)) / 111320,
+    longitude:
+      pos.longitude +
+      (meters * Math.sin(h)) / (111320 * Math.cos(degToRad(pos.latitude))),
+  };
+}
+
+/**
+ * Gimbal logic — where the camera flies for a given drone state.
+ * On-site: orbit the subject close-up. In transit: chase cam.
+ */
+function computeCamera(state) {
+  const pos = state.position;
+  const target = state.target;
+  const onSite =
+    (state.status === DRONE_STATUS.ARRIVED ||
+      state.status === DRONE_STATUS.RECORDING) &&
+    target;
+
+  if (onSite) {
+    return {
+      center: { latitude: target.latitude, longitude: target.longitude },
+      heading: bearingDeg(pos, target), // sweeps 360° as the drone orbits
+      pitch: 55,
+      altitude: 170, // close — individual rooftops/cars are visible
+    };
+  }
+
+  const headingDegrees = radToDeg(state.heading || 0);
+  return {
+    center: pointAhead(pos, headingDegrees, 120), // look down-range
+    heading: headingDegrees,
+    pitch: 62,
+    altitude: clamp((pos.altitude || 0) * 6, 220, 420),
+  };
+}
 
 const STATUS_LABEL = {
   [DRONE_STATUS.PENDING]: 'INITIALIZING',
@@ -61,16 +114,7 @@ export default function DroneCameraView({ droneState, isRecording, onClose, styl
   const initialCameraRef = useRef(null);
 
   if (!initialCameraRef.current && droneState?.position) {
-    initialCameraRef.current = {
-      center: {
-        latitude: droneState.position.latitude,
-        longitude: droneState.position.longitude,
-      },
-      heading: radToDeg(droneState.heading || 0),
-      pitch: pitchFor(droneState.status),
-      altitude: camAltitudeFor(droneState.position.altitude),
-      zoom: 17,
-    };
+    initialCameraRef.current = computeCamera(droneState);
   }
 
   // ── Fly the camera with each drone state (throttled) ─────
@@ -79,18 +123,9 @@ export default function DroneCameraView({ droneState, isRecording, onClose, styl
     const now = Date.now();
     if (now - lastAnimRef.current < MIN_ANIM_GAP_MS) return;
     lastAnimRef.current = now;
-    mapRef.current.animateCamera(
-      {
-        center: {
-          latitude: droneState.position.latitude,
-          longitude: droneState.position.longitude,
-        },
-        heading: radToDeg(droneState.heading || 0),
-        pitch: pitchFor(droneState.status),
-        altitude: camAltitudeFor(droneState.position.altitude),
-      },
-      { duration: ANIM_DURATION_MS },
-    );
+    mapRef.current.animateCamera(computeCamera(droneState), {
+      duration: ANIM_DURATION_MS,
+    });
   }, [droneState]);
 
   // ── REC dot pulse ────────────────────────────────────────
@@ -143,6 +178,20 @@ export default function DroneCameraView({ droneState, isRecording, onClose, styl
           <Text style={styles.connectingText}>Connecting to drone camera…</Text>
         </View>
       )}
+
+      {/* ── Cinematic grade: letterbox + vignette ─────────── */}
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        <View style={styles.letterboxTop} />
+        <View style={styles.letterboxBottom} />
+        <LinearGradient
+          colors={['rgba(0,0,0,0.45)', 'transparent']}
+          style={styles.vignetteTop}
+        />
+        <LinearGradient
+          colors={['transparent', 'rgba(0,0,0,0.5)']}
+          style={styles.vignetteBottom}
+        />
+      </View>
 
       {/* ── HUD ───────────────────────────────────────────── */}
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -225,6 +274,37 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.55)',
     fontSize: 13,
     marginTop: 8,
+  },
+
+  letterboxTop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '6.5%',
+    backgroundColor: '#000000',
+  },
+  letterboxBottom: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '6.5%',
+    backgroundColor: '#000000',
+  },
+  vignetteTop: {
+    position: 'absolute',
+    top: '6.5%',
+    left: 0,
+    right: 0,
+    height: '20%',
+  },
+  vignetteBottom: {
+    position: 'absolute',
+    bottom: '6.5%',
+    left: 0,
+    right: 0,
+    height: '20%',
   },
 
   bracket: { ...BRACKET },
