@@ -3,8 +3,11 @@
  *  AirSnap — FlightTrackingScreen
  * ============================================================
  *  Once the order is placed the user watches the drone fly
- *  toward their location. State is driven by the simulation
- *  server (Socket.IO) — no local timers.
+ *  toward their location on a live map. State is driven by the
+ *  simulation server (Socket.IO) — no local timers.
+ *
+ *  Tap the drone marker to open the live FPV camera view (what
+ *  the drone sees right now).
  *
  *  Route params received:
  *    • latitude, longitude, siteName
@@ -13,15 +16,47 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, Alert } from 'react-native';
+import { View, Text, StyleSheet, Animated, Alert, Modal, SafeAreaView } from 'react-native';
+import MapView, { Marker, Polyline, AnimatedRegion } from 'react-native-maps';
+import Svg, { Circle as SvgCircle, Path as SvgPath } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 
 import { ScreenWrapper, Card, StatusBadge, GradientButton } from '../components/common';
+import DroneCameraView from '../components/DroneCameraView';
 import { useTheme, useAuth } from '../context';
 import { Typography, Spacing } from '../theme';
 import { DRONE_STATUS } from '../constants';
 import { getSimClient, simApi } from '../services/SimClient';
+
+const radToDeg = (rad) => ((rad * 180) / Math.PI + 360) % 360;
+
+// Quadcopter icon for the live drone marker. The marker is rotated to
+// the drone's heading, so the white nose triangle points where it flies.
+const DroneMarkerIcon = React.memo(function DroneMarkerIcon({ color = '#0A84FF' }) {
+  return (
+    <Svg width={36} height={36} viewBox="0 0 36 36">
+      <SvgPath d="M10 10L26 26M26 10L10 26" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" />
+      <SvgCircle cx="9" cy="9" r="6" fill={color} stroke="#FFFFFF" strokeWidth="1.5" />
+      <SvgCircle cx="27" cy="9" r="6" fill={color} stroke="#FFFFFF" strokeWidth="1.5" />
+      <SvgCircle cx="9" cy="27" r="6" fill={color} stroke="#FFFFFF" strokeWidth="1.5" />
+      <SvgCircle cx="27" cy="27" r="6" fill={color} stroke="#FFFFFF" strokeWidth="1.5" />
+      <SvgCircle cx="18" cy="18" r="6.5" fill="#FFFFFF" />
+      <SvgCircle cx="18" cy="18" r="4.5" fill={color} />
+      <SvgPath d="M18 12.5L20.5 17H15.5Z" fill="#FFFFFF" />
+    </Svg>
+  );
+});
+
+// Same hexagon hive marker used on the home map, just smaller.
+const HiveMarkerIcon = React.memo(function HiveMarkerIcon({ color = '#0A84FF' }) {
+  return (
+    <Svg width={30} height={30} viewBox="0 0 40 40">
+      <SvgCircle cx="20" cy="20" r="19" fill={color} stroke="#fff" strokeWidth="1.5" />
+      <SvgPath d="M20 7L31 14V26L20 33L9 26V14L20 7Z" fill="#FFFFFF" />
+      <SvgCircle cx="20" cy="20" r="5" fill="#00D4AA" />
+    </Svg>
+  );
+});
 
 const TIMELINE = [
   { key: 'dispatch', label: 'Assigning Drone',     statuses: [DRONE_STATUS.PENDING] },
@@ -43,11 +78,25 @@ export default function FlightTrackingScreen({ navigation, route }) {
 
   const [droneState, setDroneState] = useState(null);
   const [currentStatus, setCurrentStatus] = useState(DRONE_STATUS.PENDING);
+  const [showCamera, setShowCamera] = useState(false);
   // Tracks whether the user has chosen to abandon — once true, we let the
   // navigation through without re-prompting (or once recording starts and
   // we're on our way to LiveSession, also let it through).
   const allowLeaveRef = useRef(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const mapRef = useRef(null);
+
+  // Animated coordinate interpolates between the 10 Hz server samples so
+  // the marker glides instead of stepping. AnimatedRegion drives native
+  // props, so useNativeDriver must stay false.
+  const droneCoord = useRef(
+    new AnimatedRegion({
+      latitude: hive?.latitude ?? latitude,
+      longitude: hive?.longitude ?? longitude,
+      latitudeDelta: 0,
+      longitudeDelta: 0,
+    })
+  ).current;
 
   // ── Subscribe to drone state for this order ─────────────
   useEffect(() => {
@@ -61,6 +110,14 @@ export default function FlightTrackingScreen({ navigation, route }) {
       if (!mounted || state.orderId !== orderId) return;
       setDroneState(state);
       setCurrentStatus(state.status);
+      droneCoord
+        .timing({
+          latitude: state.position.latitude,
+          longitude: state.position.longitude,
+          duration: 110,
+          useNativeDriver: false,
+        })
+        .start();
     });
     const offStatus = sim.onOrderStatus((payload) => {
       if (!mounted || payload.orderId !== orderId) return;
@@ -146,6 +203,24 @@ export default function FlightTrackingScreen({ navigation, route }) {
   const distanceKm = distanceMeters / 1000;
   const showStart = currentStatus === DRONE_STATUS.ARRIVED;
 
+  // ── Map view-model ───────────────────────────────────────
+  const hiveLat = hive?.latitude ?? latitude;
+  const hiveLng = hive?.longitude ?? longitude;
+  const initialRegion = {
+    latitude: (hiveLat + latitude) / 2,
+    longitude: (hiveLng + longitude) / 2,
+    latitudeDelta: Math.max(Math.abs(hiveLat - latitude) * 2.5, 0.01),
+    longitudeDelta: Math.max(Math.abs(hiveLng - longitude) * 2.5, 0.01),
+  };
+  // Where the flight line points: back home when returning, else the target.
+  const lineTo =
+    currentStatus === DRONE_STATUS.RETURNING
+      ? { latitude: hiveLat, longitude: hiveLng }
+      : droneState?.target || { latitude, longitude };
+  const showFlightLine =
+    droneState &&
+    [DRONE_STATUS.EN_ROUTE, DRONE_STATUS.RETURNING].includes(currentStatus);
+
   const handleStartSession = () => {
     allowLeaveRef.current = true;
     navigation.navigate('LiveSession', {
@@ -199,27 +274,81 @@ export default function FlightTrackingScreen({ navigation, route }) {
       <StatusBadge status={currentStatus} style={styles.badge} />
 
       <Card style={styles.mapCard}>
-        <LinearGradient
-          colors={[colors.bgCard, colors.bgCardLight]}
-          style={styles.mapPlaceholder}
+        <MapView
+          ref={mapRef}
+          style={styles.map}
+          mapType="mutedStandard"
+          initialRegion={initialRegion}
+          showsUserLocation
+          showsPointsOfInterest={false}
+          onMapReady={() => {
+            mapRef.current?.fitToCoordinates(
+              [
+                { latitude: hiveLat, longitude: hiveLng },
+                { latitude, longitude },
+              ],
+              {
+                edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
+                animated: false,
+              },
+            );
+          }}
         >
-          <Ionicons name="map" size={48} color={colors.primary + '55'} />
-          <Text style={[Typography.caption, { marginTop: 8, color: colors.textMuted }]}>
-            Live map — ({latitude.toFixed(4)}, {longitude.toFixed(4)})
-          </Text>
+          {/* Hive (home base) */}
+          <Marker
+            coordinate={{ latitude: hiveLat, longitude: hiveLng }}
+            anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={false}
+            title={hive?.name || 'Hive'}
+          >
+            <HiveMarkerIcon color={colors.primary} />
+          </Marker>
 
-          <View style={styles.dronePath}>
-            <Ionicons name="navigate" size={22} color={colors.primary} />
-            <View style={styles.pathLine} />
-            <Ionicons name="location" size={22} color={colors.accent} />
-          </View>
+          {/* Destination */}
+          <Marker
+            coordinate={{ latitude, longitude }}
+            anchor={{ x: 0.5, y: 1 }}
+            tracksViewChanges={false}
+            title={siteName || 'Your spot'}
+          >
+            <Ionicons name="location" size={30} color={colors.accent} />
+          </Marker>
 
-          {hive?.name && (
-            <Text style={[Typography.caption, { color: colors.textMuted, marginTop: 4 }]}>
-              From hive: {hive.name}
-            </Text>
+          {/* Flight line */}
+          {showFlightLine && (
+            <Polyline
+              coordinates={[
+                {
+                  latitude: droneState.position.latitude,
+                  longitude: droneState.position.longitude,
+                },
+                lineTo,
+              ]}
+              strokeColor={colors.primary}
+              strokeWidth={2}
+              lineDashPattern={[6, 6]}
+            />
           )}
-        </LinearGradient>
+
+          {/* Live drone — tap for FPV camera */}
+          <Marker.Animated
+            coordinate={droneCoord}
+            anchor={{ x: 0.5, y: 0.5 }}
+            rotation={radToDeg(droneState?.heading || 0)}
+            tracksViewChanges={false}
+            zIndex={10}
+            onPress={() => setShowCamera(true)}
+          >
+            <DroneMarkerIcon color={colors.primary} />
+          </Marker.Animated>
+        </MapView>
+
+        <View style={styles.mapHint}>
+          <Ionicons name="videocam" size={14} color={colors.accent} />
+          <Text style={[Typography.caption, { color: colors.textSecondary, marginLeft: 6 }]}>
+            Tap the drone to see its live camera
+          </Text>
+        </View>
       </Card>
 
       <View style={styles.statsRow}>
@@ -267,6 +396,21 @@ export default function FlightTrackingScreen({ navigation, route }) {
           style={styles.startBtn}
         />
       )}
+
+      {/* ── Full-screen FPV camera (tap drone marker) ─────── */}
+      <Modal
+        visible={showCamera}
+        animationType="slide"
+        onRequestClose={() => setShowCamera(false)}
+      >
+        <SafeAreaView style={styles.cameraModal}>
+          <DroneCameraView
+            droneState={droneState}
+            isRecording={currentStatus === DRONE_STATUS.RECORDING}
+            onClose={() => setShowCamera(false)}
+          />
+        </SafeAreaView>
+      </Modal>
     </ScreenWrapper>
   );
 }
@@ -275,21 +419,20 @@ export default function FlightTrackingScreen({ navigation, route }) {
 const dynamicStyles = (colors) => StyleSheet.create({
   badge: { marginBottom: Spacing.md },
   mapCard: { padding: 0, overflow: 'hidden', marginBottom: Spacing.lg },
-  mapPlaceholder: {
-    height: 200,
-    alignItems: 'center',
-    justifyContent: 'center',
+  map: {
+    height: 240,
+    width: '100%',
   },
-  dronePath: {
+  mapHint: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: Spacing.md,
+    justifyContent: 'center',
+    paddingVertical: Spacing.sm,
+    backgroundColor: colors.bgCard,
   },
-  pathLine: {
-    width: 100,
-    height: 2,
-    backgroundColor: colors.primary + '55',
-    marginHorizontal: 8,
+  cameraModal: {
+    flex: 1,
+    backgroundColor: '#05050C',
   },
 
   statsRow: {

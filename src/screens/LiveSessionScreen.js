@@ -24,14 +24,13 @@ import {
   View,
   Text,
   StyleSheet,
-  Animated,
   Dimensions,
   TouchableOpacity,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 
 import { ScreenWrapper, ProgressBar, StatusBadge } from '../components/common';
+import DroneCameraView from '../components/DroneCameraView';
 import { useTheme, useLocation } from '../context';
 import { Typography, Spacing } from '../theme';
 import { DRONE_STATUS } from '../constants';
@@ -61,12 +60,12 @@ export default function LiveSessionScreen({ navigation, route }) {
   const { position } = useLocation();
 
   const [droneStatus, setDroneStatus] = useState(DRONE_STATUS.ARRIVED);
+  const [droneState, setDroneState] = useState(null);
   const [elapsedSec, setElapsedSec] = useState(0);
   const totalSec = pkg.durationSec || 30;
   const progress = Math.min(elapsedSec / totalSec, 1);
   const stageIdx = getCurrentStage(progress);
 
-  const pulseAnim = useRef(new Animated.Value(1)).current;
   const sessionStartedRef = useRef(false);
   const navigatedRef = useRef(false);
   const deliveredMediaRef = useRef(null);
@@ -90,6 +89,7 @@ export default function LiveSessionScreen({ navigation, route }) {
     const offState = sim.onDroneState((state) => {
       if (!mounted || state.orderId !== orderId) return;
       setDroneStatus(state.status);
+      setDroneState(state);
     });
     const offProgress = sim.onSessionProgress(({ orderId: id, elapsedSec: e }) => {
       if (!mounted || id !== orderId) return;
@@ -115,18 +115,6 @@ export default function LiveSessionScreen({ navigation, route }) {
     sim.sendUserLocation(orderId, position.latitude, position.longitude, position.accuracy)
       .catch(() => {});
   }, [orderId, position?.latitude, position?.longitude]);
-
-  // ── Recording-dot pulse ──────────────────────────────────
-  useEffect(() => {
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.5, duration: 600, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
-      ])
-    );
-    pulse.start();
-    return () => pulse.stop();
-  }, [pulseAnim]);
 
   // ── Auto-navigate when the session is done ───────────────
   useEffect(() => {
@@ -165,28 +153,11 @@ export default function LiveSessionScreen({ navigation, route }) {
   return (
     <ScreenWrapper title="Live Session" scroll={false}>
       <View style={styles.liveView}>
-        <LinearGradient
-          colors={['#0a0a1a', '#1a1a3e']}
-          style={styles.liveGradient}
-        >
-          <Ionicons name="videocam" size={44} color={colors.primary + '55'} />
-          <Text style={[Typography.bodySmall, { color: colors.textSecondary, marginTop: 8 }]}>
-            Drone Camera Feed
-          </Text>
-
-          {isRecording && (
-            <View style={styles.recBadge}>
-              <Animated.View
-                style={[styles.recDot, { transform: [{ scale: pulseAnim }] }]}
-              />
-              <Text style={styles.recText}>REC</Text>
-            </View>
-          )}
-
+        <DroneCameraView droneState={droneState} isRecording={isRecording}>
           <View style={styles.pkgTag}>
             <Text style={styles.pkgTagText}>{pkg.name}</Text>
           </View>
-        </LinearGradient>
+        </DroneCameraView>
       </View>
 
       <View style={styles.panel}>
@@ -269,44 +240,19 @@ const dynamicStyles = (colors) => StyleSheet.create({
     borderBottomRightRadius: Spacing.radiusLg,
     overflow: 'hidden',
   },
-  liveGradient: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  recBadge: {
-    position: 'absolute',
-    top: 16,
-    left: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.error + '33',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: Spacing.radiusFull,
-  },
-  recDot: {
-    width: 10, height: 10, borderRadius: 5,
-    backgroundColor: colors.error,
-    marginRight: 6,
-  },
-  recText: {
-    color: colors.error,
-    fontWeight: '800',
-    fontSize: 12,
-    letterSpacing: 1,
-  },
+  // Sits inside the FPV feed, tucked above the telemetry strip so it
+  // doesn't collide with the HUD's top row.
   pkgTag: {
     position: 'absolute',
-    top: 16,
+    bottom: 56,
     right: 16,
-    backgroundColor: colors.primary + '44',
+    backgroundColor: 'rgba(10, 132, 255, 0.35)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: Spacing.radiusSm,
   },
   pkgTagText: {
-    color: colors.primary,
+    color: '#FFFFFF',
     fontWeight: '700',
     fontSize: 12,
   },

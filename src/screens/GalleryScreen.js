@@ -9,11 +9,12 @@
  *    • Masonry-style 2-column image grid
  *    • Filter chips: All / Photos / Videos
  *    • Pull-to-refresh (simulated)
- *    • Tap a thumbnail to view full-screen placeholder
+ *    • Tap a thumbnail to view full-screen (videos play with
+ *      native controls)
  *    • Empty-state illustration when no content exists
  *
- *  Data source: MOCK_GALLERY from constants. In production
- *  this would come from a local DB or cloud storage.
+ *  Data source: AsyncStorage gallery persisted by
+ *  ContentDeliveryScreen after each order.
  * ============================================================
  */
 
@@ -27,13 +28,14 @@ import {
   RefreshControl,
   StyleSheet,
   Dimensions,
-  Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import { Video, ResizeMode } from 'expo-av';
 
 import { ScreenWrapper } from '../components/common';
+import MediaViewerModal from '../components/MediaViewerModal';
 import { useTheme } from '../context';
 import { Typography, Spacing } from '../theme';
 
@@ -47,7 +49,7 @@ export default function GalleryScreen() {
   // ── State ──────────────────────────────────────────────
   const [filter, setFilter] = useState('all');          // all | photo | video
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedImage, setSelectedImage] = useState(null);
+  const [selected, setSelected] = useState(null);       // { uri, type }
   const [items, setItems] = useState([]);
   const { colors } = useTheme();
   const styles = dynamicStyles(colors);
@@ -80,9 +82,21 @@ export default function GalleryScreen() {
       <TouchableOpacity
         style={[styles.tile, { height: tileHeight }]}
         activeOpacity={0.85}
-        onPress={() => setSelectedImage(item.uri)}
+        onPress={() => setSelected({ uri: item.uri, type: item.type })}
       >
-        <Image source={{ uri: item.uri }} style={styles.tileImage} />
+        {item.type === 'video' ? (
+          // A paused Video renders the clip's first frame — an <Image>
+          // pointed at an MP4 URL would stay blank.
+          <Video
+            source={{ uri: item.uri }}
+            style={styles.tileImage}
+            resizeMode={ResizeMode.COVER}
+            shouldPlay={false}
+            isMuted
+          />
+        ) : (
+          <Image source={{ uri: item.uri }} style={styles.tileImage} />
+        )}
 
         {/* Date overlay */}
         <View style={styles.tileOverlay}>
@@ -149,24 +163,8 @@ export default function GalleryScreen() {
         />
       )}
 
-      {/* ── Full-screen preview modal ─────────────────────── */}
-      <Modal visible={!!selectedImage} transparent animationType="fade">
-        <View style={styles.modalBg}>
-          <TouchableOpacity
-            style={styles.modalClose}
-            onPress={() => setSelectedImage(null)}
-          >
-            <Ionicons name="close-circle" size={36} color={colors.white} />
-          </TouchableOpacity>
-          {selectedImage && (
-            <Image
-              source={{ uri: selectedImage }}
-              style={styles.modalImage}
-              resizeMode="contain"
-            />
-          )}
-        </View>
-      </Modal>
+      {/* ── Full-screen preview (photos + playable videos) ── */}
+      <MediaViewerModal item={selected} onClose={() => setSelected(null)} />
     </ScreenWrapper>
   );
 }
@@ -242,24 +240,5 @@ const dynamicStyles = (colors) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: Spacing.xl,
-  },
-
-  // ── Modal ───────────────────────────────────────────────
-  modalBg: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalClose: {
-    position: 'absolute',
-    top: 60,
-    right: 20,
-    zIndex: 10,
-  },
-  modalImage: {
-    width: width - 40,
-    height: width - 40,
-    borderRadius: Spacing.radiusMd,
   },
 });

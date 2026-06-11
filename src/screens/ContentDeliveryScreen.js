@@ -28,11 +28,13 @@ import {
   Easing,
   Image,
   FlatList,
+  TouchableOpacity,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { ScreenWrapper, GradientButton, Card } from '../components/common';
+import MediaViewerModal from '../components/MediaViewerModal';
 import { useTheme } from '../context';
 import { Typography, Spacing } from '../theme';
 import { simApi, getSimClient } from '../services/SimClient';
@@ -89,6 +91,7 @@ export default function ContentDeliveryScreen({ navigation, route }) {
 
   const [media, setMedia] = useState(initialMedia || null);
   const [delivered, setDelivered] = useState(!!initialMedia);
+  const [viewer, setViewer] = useState(null); // { uri, type } for full-screen view
 
   const spinAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(initialMedia ? 1 : 0)).current;
@@ -187,15 +190,36 @@ export default function ContentDeliveryScreen({ navigation, route }) {
                 style={styles.thumbsRow}
                 contentContainerStyle={styles.thumbsContent}
                 renderItem={({ item }) => (
-                  <Image source={{ uri: item }} style={styles.thumb} />
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => setViewer({ uri: item, type: 'photo' })}
+                  >
+                    <Image source={{ uri: item }} style={styles.thumb} />
+                  </TouchableOpacity>
                 )}
                 ListFooterComponent={
-                  remainingCount > 0 ? (
-                    <View style={[styles.thumb, styles.moreTile]}>
-                      <Text style={styles.moreText}>+{remainingCount}</Text>
-                      <Text style={styles.moreSub}>more</Text>
-                    </View>
-                  ) : null
+                  <>
+                    {(media?.videos?.length || 0) > 0 && (
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        style={[styles.thumb, styles.videoTile]}
+                        onPress={() => setViewer({ uri: media.videos[0], type: 'video' })}
+                      >
+                        <Ionicons name="play-circle" size={36} color={colors.white} />
+                        <Text style={styles.videoTileText}>Video</Text>
+                      </TouchableOpacity>
+                    )}
+                    {remainingCount > 0 ? (
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        style={[styles.thumb, styles.moreTile]}
+                        onPress={() => navigation.navigate('Gallery')}
+                      >
+                        <Text style={styles.moreText}>+{remainingCount}</Text>
+                        <Text style={styles.moreSub}>more</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </>
                 }
               />
             )}
@@ -236,6 +260,8 @@ export default function ContentDeliveryScreen({ navigation, route }) {
           </>
         )}
       </View>
+
+      <MediaViewerModal item={viewer} onClose={() => setViewer(null)} />
     </ScreenWrapper>
   );
 }
@@ -271,6 +297,17 @@ const dynamicStyles = (colors) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.primary + '22',
+  },
+  videoTile: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#10101E',
+  },
+  videoTileText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.white,
+    marginTop: 2,
   },
   moreText: { fontSize: 22, fontWeight: '800', color: colors.primary },
   moreSub: { fontSize: 11, color: colors.primary, marginTop: 2 },

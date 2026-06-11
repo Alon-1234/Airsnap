@@ -59,7 +59,7 @@ const orderStore = require('./orderStore');
 const userStore = require('./userStore');
 const promoStore = require('./promoStore');
 const { Drone, STATUS } = require('./droneSim');
-const { pickMedia } = require('./samples');
+const { generateMedia } = require('./samples');
 const { splitPayment, round2 } = require('./credits');
 
 const PORT = Number(process.env.PORT) || 4000;
@@ -596,7 +596,8 @@ function startDroneForOrder(order, startBattery) {
         setTimeout(() => drones.delete(order.id), 5000);
         return;
       }
-      const media = pickMedia(order.package);
+      // Real aerial imagery of the actual ordered location.
+      const media = generateMedia(order);
       orderStore.markDelivered(order.id, media);
       const deliveredPayload = { orderId: order.id, media, deliveredAt: Date.now() };
       io.to(`order:${order.id}`).emit('order:delivered', deliveredPayload);

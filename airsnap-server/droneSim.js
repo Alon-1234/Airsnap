@@ -39,6 +39,19 @@ const ORBIT_RADIUS  = 15;           // meters
 const ARRIVAL_TOL_M = 3;            // close-enough threshold
 const HIVE_LAND_TOL = 2;
 
+// Speed floor used for ETA estimates while the drone is still
+// accelerating (or hovering) — without it the ETA reads 0 even
+// when the drone is kilometers away.
+const ETA_NOMINAL_SPEED = MAX_H_SPEED * 0.8;
+
+// Low-pass factor for the live user GPS target (per 30 Hz tick,
+// ~11 s time constant). Raw phone GPS jitters by several meters;
+// hovering/orbiting around the raw fix makes the drone twitch.
+// Heavy smoothing keeps the hover rock-steady for a stationary
+// user; a walking user is still followed within ~10 s, which
+// reads as a deliberate cinematic pan during the orbit.
+const TARGET_FILTER_ALPHA = 0.003;
+
 const STATUS = {
   PENDING:    'pending',
   EN_ROUTE:   'en_route',
@@ -64,7 +77,8 @@ class Drone {
     this.orderId = orderId;
     this.droneId = droneId || null;                     // hive slot id (e.g. hive_x_d1)
     this.hive = hive;                                   // { latitude, longitude }
-    this.target = { ...target };                        // { latitude, longitude }
+    this.target = { ...target };                        // { latitude, longitude } raw live GPS
+    this.filteredTarget = { ...target };                // low-passed copy used for hover/orbit
     this.durationSec = durationSec || 30;
     this.onState = onState || (() => {});
     this.onStatus = onStatus || (() => {});
@@ -86,6 +100,8 @@ class Drone {
 
     this.tickCount = 0;
     this.handle = null;
+    this.stopped = false;
+    this._deliverTimeout = null;
   }
 
   // ── Public controls ──
@@ -94,6 +110,11 @@ class Drone {
     this.handle = setInterval(() => this._tick(), TICK_DT * 1000);
   }
   stop() {
+    this.stopped = true;
+    if (this._deliverTimeout) {
+      clearTimeout(this._deliverTimeout);
+      this._deliverTimeout = null;
+    }
     if (this.handle) {
       clearInterval(this.handle);
       this.handle = null;
@@ -148,12 +169,15 @@ class Drone {
     const horizSpeed = Math.hypot(this.vel.east, this.vel.north);
     let distanceMeters = 0;
     let etaSec = 0;
+    // ETA falls back to a nominal cruise speed while the drone is slow
+    // (accelerating / hovering) so it never reads 0 with distance left.
+    const etaSpeed = Math.max(horizSpeed, ETA_NOMINAL_SPEED);
     if (this.status === STATUS.EN_ROUTE || this.status === STATUS.ARRIVED) {
-      distanceMeters = haversineDistanceMeters({ latitude: ll.latitude, longitude: ll.longitude }, this.target);
-      etaSec = horizSpeed > 0.5 ? Math.round(distanceMeters / horizSpeed) : 0;
+      distanceMeters = haversineDistanceMeters({ latitude: ll.latitude, longitude: ll.longitude }, this.filteredTarget);
+      etaSec = distanceMeters < ARRIVAL_TOL_M ? 0 : Math.round(distanceMeters / etaSpeed);
     } else if (this.status === STATUS.RETURNING) {
       distanceMeters = Math.hypot(this.pos.east, this.pos.north);
-      etaSec = horizSpeed > 0.5 ? Math.round(distanceMeters / horizSpeed) : 0;
+      etaSec = distanceMeters < HIVE_LAND_TOL ? 0 : Math.round(distanceMeters / etaSpeed);
     }
     return {
       orderId: this.orderId,
@@ -165,7 +189,9 @@ class Drone {
       status: this.status,
       etaSec,
       distanceMeters,
-      target: { ...this.target },
+      // Filtered target so map markers / camera follow the same smoothed
+      // point the drone itself is flying to.
+      target: { ...this.filteredTarget },
       hive: { latitude: this.hive.latitude, longitude: this.hive.longitude },
     };
   }
@@ -220,7 +246,12 @@ class Drone {
   // ── Tick ──
   _tick() {
     this.tickCount += 1;
-    this.battery -= 0.05 * TICK_DT;
+    this.battery = Math.max(0, this.battery - 0.05 * TICK_DT);
+
+    // Track the live GPS target with a low-pass filter so phone GPS
+    // noise doesn't make the hover/orbit point twitch.
+    this.filteredTarget.latitude  += (this.target.latitude  - this.filteredTarget.latitude)  * TARGET_FILTER_ALPHA;
+    this.filteredTarget.longitude += (this.target.longitude - this.filteredTarget.longitude) * TARGET_FILTER_ALPHA;
 
     switch (this.status) {
       case STATUS.PENDING:
@@ -232,7 +263,7 @@ class Drone {
 
       case STATUS.EN_ROUTE: {
         // Two-phase: climb to cruise alt, then go to target; final descent.
-        const targetEnu = this._targetEnu(this.target, CRUISE_ALT);
+        const targetEnu = this._targetEnu(this.filteredTarget, CRUISE_ALT);
         const horizRemaining = Math.hypot(targetEnu.east - this.pos.east, targetEnu.north - this.pos.north);
 
         // If we're far from target, hold cruise altitude. If close, descend to RECORD_ALT.
@@ -247,8 +278,23 @@ class Drone {
       }
 
       case STATUS.ARRIVED: {
-        // Hover at target.
-        const desired = this._targetEnu(this.target, RECORD_ALT);
+        // Hover at target. Once we're basically there and slow, snap and
+        // hold — otherwise residual velocity makes the drone bounce around
+        // the hover point forever.
+        const desired = this._targetEnu(this.filteredTarget, RECORD_ALT);
+        const dx = desired.east - this.pos.east;
+        const dy = desired.north - this.pos.north;
+        const horizDist = Math.hypot(dx, dy);
+        const hSpeed = Math.hypot(this.vel.east, this.vel.north);
+        if (horizDist < 0.75 && hSpeed < 0.5) {
+          this.pos = { ...desired };
+          this.vel = { east: 0, north: 0, up: 0 };
+          break;
+        }
+        if (horizDist < ARRIVAL_TOL_M) {
+          this.vel.east *= 0.9;
+          this.vel.north *= 0.9;
+        }
         this._moveToward(desired);
         break;
       }
@@ -256,7 +302,7 @@ class Drone {
       case STATUS.RECORDING: {
         // Orbit the user at RECORD_ALT.
         this.orbitAngle += (Math.PI * 2 / 30) * TICK_DT; // one revolution per 30 s
-        const base = llToEnuMeters(this.hive, this.target);
+        const base = llToEnuMeters(this.hive, this.filteredTarget);
         const desired = {
           east:  base.east  + Math.cos(this.orbitAngle) * ORBIT_RADIUS,
           north: base.north + Math.sin(this.orbitAngle) * ORBIT_RADIUS,
@@ -290,8 +336,12 @@ class Drone {
           this.vel.east = 0; this.vel.north = 0; this.vel.up = 0;
           this.status = STATUS.PROCESSING;
           this._emitStatus('Processing footage');
-          // After 2 s of "processing", mark DELIVERED.
-          setTimeout(() => {
+          // After 2 s of "processing", mark DELIVERED. Guarded so an
+          // external stop() (cleanup, abandon teardown) can't be followed
+          // by a ghost "Delivered" emission.
+          this._deliverTimeout = setTimeout(() => {
+            this._deliverTimeout = null;
+            if (this.stopped) return;
             this.status = STATUS.DELIVERED;
             this._emitStatus('Delivered');
             this.onState(this.snapshot());
