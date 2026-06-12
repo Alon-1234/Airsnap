@@ -6,14 +6,17 @@
  *
  *  Two levels:
  *    • Folder grid — one card per order/flight with a cover
- *      photo, site name, date and media counts.
+ *      photo, site name, date and media counts. Pencil icon
+ *      renames the folder (persisted).
  *    • Folder detail — masonry grid of that flight's media
  *      with All / Photos / Videos filter chips. Tap to view
  *      full-screen (videos play with native controls).
+ *      "Save all" downloads the whole flight to Photos.
  *
  *  Data sources (AsyncStorage, persisted by ContentDelivery):
- *    @airsnap_gallery — flat media items { id, uri, type, date, orderId }
- *    @airsnap_orders  — order metadata  { id, site, package, date, ... }
+ *    @airsnap_gallery      — flat media items { id, uri, type, date, orderId }
+ *    @airsnap_orders       — order metadata  { id, site, package, date, ... }
+ *    @airsnap_folder_names — user renames    { [folderId]: customName }
  * ============================================================
  */
 
@@ -23,8 +26,12 @@ import {
   Text,
   FlatList,
   Image,
+  TextInput,
   TouchableOpacity,
   RefreshControl,
+  ActivityIndicator,
+  Modal,
+  Alert,
   StyleSheet,
   Dimensions,
 } from 'react-native';
@@ -35,11 +42,13 @@ import { Video, ResizeMode } from 'expo-av';
 
 import { ScreenWrapper } from '../components/common';
 import MediaViewerModal from '../components/MediaViewerModal';
+import { saveMediaToDevice } from '../utils/mediaDownload';
 import { useTheme } from '../context';
 import { Typography, Spacing } from '../theme';
 
 const GALLERY_KEY = '@airsnap_gallery';
 const ORDERS_KEY = '@airsnap_orders';
+const FOLDER_NAMES_KEY = '@airsnap_folder_names';
 
 const { width } = Dimensions.get('window');
 const COLUMN_GAP = 10;
@@ -52,25 +61,32 @@ export default function GalleryScreen() {
   const [selected, setSelected] = useState(null);       // { uri, type }
   const [items, setItems] = useState([]);
   const [ordersMeta, setOrdersMeta] = useState({});     // orderId -> order
+  const [folderNames, setFolderNames] = useState({});   // folderId -> custom name
   const [openFolderId, setOpenFolderId] = useState(null);
+  const [renaming, setRenaming] = useState(null);       // { id, currentName }
+  const [renameText, setRenameText] = useState('');
+  const [savingAll, setSavingAll] = useState(null);     // null | { done, total }
   const { colors } = useTheme();
   const styles = dynamicStyles(colors);
 
   // ── Load from AsyncStorage (re-runs on tab focus) ──────
   const reload = useCallback(async () => {
     try {
-      const [galleryRaw, ordersRaw] = await Promise.all([
+      const [galleryRaw, ordersRaw, namesRaw] = await Promise.all([
         AsyncStorage.getItem(GALLERY_KEY),
         AsyncStorage.getItem(ORDERS_KEY),
+        AsyncStorage.getItem(FOLDER_NAMES_KEY),
       ]);
       setItems(galleryRaw ? JSON.parse(galleryRaw) : []);
       const orders = ordersRaw ? JSON.parse(ordersRaw) : [];
       const meta = {};
       for (const o of orders) meta[o.id] = o;
       setOrdersMeta(meta);
+      setFolderNames(namesRaw ? JSON.parse(namesRaw) : {});
     } catch (_) {
       setItems([]);
       setOrdersMeta({});
+      setFolderNames({});
     }
   }, []);
 
@@ -92,9 +108,8 @@ export default function GalleryScreen() {
         byId.set(key, {
           id: key,
           title:
-            key === 'other'
-              ? 'Other media'
-              : meta?.site || 'Drone flight',
+            folderNames[key] ||
+            (key === 'other' ? 'Other media' : meta?.site || 'Drone flight'),
           date: meta?.date || item.date || '',
           packageName: meta?.package || null,
           items: [],
@@ -109,7 +124,7 @@ export default function GalleryScreen() {
       photoCount: f.items.filter((i) => i.type === 'photo').length,
       videoCount: f.items.filter((i) => i.type === 'video').length,
     }));
-  }, [items, ordersMeta]);
+  }, [items, ordersMeta, folderNames]);
 
   const openFolder = folders.find((f) => f.id === openFolderId) || null;
   const folderItems = openFolder
@@ -117,6 +132,59 @@ export default function GalleryScreen() {
       ? openFolder.items
       : openFolder.items.filter((i) => i.type === filter)
     : [];
+
+  // ── Rename ──────────────────────────────────────────────
+  const startRename = (folder) => {
+    setRenameText(folder.title);
+    setRenaming({ id: folder.id, currentName: folder.title });
+  };
+
+  const commitRename = async () => {
+    const name = renameText.trim();
+    if (!renaming) return;
+    const next = { ...folderNames };
+    if (name && name !== renaming.currentName) {
+      next[renaming.id] = name;
+    } else if (!name) {
+      // Cleared → fall back to the default title.
+      delete next[renaming.id];
+    }
+    setFolderNames(next);
+    setRenaming(null);
+    try {
+      await AsyncStorage.setItem(FOLDER_NAMES_KEY, JSON.stringify(next));
+    } catch (_) { /* non-critical — name still applied for this session */ }
+  };
+
+  // ── Save all media in the open folder to Photos ────────
+  const handleSaveAll = async () => {
+    if (!openFolder || savingAll) return;
+    const toSave = openFolder.items;
+    if (!toSave.length) return;
+    setSavingAll({ done: 0, total: toSave.length });
+    let failed = 0;
+    for (let i = 0; i < toSave.length; i++) {
+      try {
+        await saveMediaToDevice(toSave[i].uri, toSave[i].type);
+      } catch (err) {
+        failed += 1;
+        // Permission denied → no point continuing the loop.
+        if (/permission/i.test(err.message || '')) {
+          setSavingAll(null);
+          Alert.alert('Could not save', err.message);
+          return;
+        }
+      }
+      setSavingAll({ done: i + 1, total: toSave.length });
+    }
+    setSavingAll(null);
+    Alert.alert(
+      failed ? 'Partially saved' : 'Saved',
+      failed
+        ? `${toSave.length - failed} of ${toSave.length} items saved to Photos (${failed} failed).`
+        : `All ${toSave.length} items saved to your Photos.`,
+    );
+  };
 
   // ── Tile renderers ──────────────────────────────────────
   const renderFolder = ({ item: folder }) => (
@@ -127,6 +195,7 @@ export default function GalleryScreen() {
         setFilter('all');
         setOpenFolderId(folder.id);
       }}
+      onLongPress={() => startRename(folder)}
     >
       {folder.cover?.type === 'video' ? (
         <Video
@@ -143,6 +212,16 @@ export default function GalleryScreen() {
           <Ionicons name="images-outline" size={28} color={colors.textMuted} />
         </View>
       )}
+
+      {/* Rename (pencil) — also reachable via long-press on the card */}
+      <TouchableOpacity
+        style={styles.renameBtn}
+        onPress={() => startRename(folder)}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Ionicons name="pencil" size={14} color="#FFFFFF" />
+      </TouchableOpacity>
+
       <View style={styles.folderInfo}>
         <Text style={[Typography.bodySemibold, { color: colors.textPrimary }]} numberOfLines={1}>
           {folder.title}
@@ -216,24 +295,85 @@ export default function GalleryScreen() {
     />
   );
 
+  // ── Rename modal (shared by grid + detail) ──────────────
+  const renameModal = (
+    <Modal visible={!!renaming} transparent animationType="fade" onRequestClose={() => setRenaming(null)}>
+      <View style={styles.renameBackdrop}>
+        <View style={styles.renameCard}>
+          <Text style={[Typography.bodySemibold, { color: colors.textPrimary, marginBottom: Spacing.sm }]}>
+            Rename folder
+          </Text>
+          <TextInput
+            style={styles.renameInput}
+            value={renameText}
+            onChangeText={setRenameText}
+            placeholder="Folder name"
+            placeholderTextColor={colors.textMuted}
+            autoFocus
+            maxLength={40}
+            returnKeyType="done"
+            onSubmitEditing={commitRename}
+          />
+          <View style={styles.renameActions}>
+            <TouchableOpacity style={styles.renameCancel} onPress={() => setRenaming(null)}>
+              <Text style={[Typography.bodySmall, { color: colors.textSecondary }]}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.renameSave, { backgroundColor: colors.primary }]} onPress={commitRename}>
+              <Text style={[Typography.bodySmall, { color: '#FFFFFF', fontWeight: '700' }]}>Save</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
   // ── Render: folder detail ───────────────────────────────
   if (openFolder) {
     return (
       <ScreenWrapper title="My Gallery" scroll={false}>
-        <TouchableOpacity
-          style={styles.folderHeader}
-          onPress={() => setOpenFolderId(null)}
-        >
-          <Ionicons name="chevron-back" size={22} color={colors.primary} />
-          <View style={{ flex: 1, marginLeft: 6 }}>
-            <Text style={[Typography.bodySemibold, { color: colors.textPrimary }]} numberOfLines={1}>
-              {openFolder.title}
-            </Text>
-            <Text style={[Typography.caption, { color: colors.textMuted }]}>
-              {openFolder.date} • {openFolder.items.length} items
-            </Text>
-          </View>
-        </TouchableOpacity>
+        <View style={styles.folderHeader}>
+          <TouchableOpacity
+            style={styles.folderHeaderBack}
+            onPress={() => setOpenFolderId(null)}
+          >
+            <Ionicons name="chevron-back" size={22} color={colors.primary} />
+            <View style={{ flex: 1, marginLeft: 6 }}>
+              <Text style={[Typography.bodySemibold, { color: colors.textPrimary }]} numberOfLines={1}>
+                {openFolder.title}
+              </Text>
+              <Text style={[Typography.caption, { color: colors.textMuted }]}>
+                {openFolder.date} • {openFolder.items.length} items
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.headerIconBtn}
+            onPress={() => startRename(openFolder)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="pencil" size={18} color={colors.textSecondary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.headerIconBtn}
+            onPress={handleSaveAll}
+            disabled={!!savingAll}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            {savingAll ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Ionicons name="download-outline" size={20} color={colors.primary} />
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {savingAll && (
+          <Text style={[Typography.caption, { color: colors.textMuted, paddingHorizontal: Spacing.screenPadding, marginBottom: Spacing.xs }]}>
+            Saving {savingAll.done}/{savingAll.total} to Photos…
+          </Text>
+        )}
 
         <View style={styles.chipRow}>
           <Chip label="All" value="all" />
@@ -262,6 +402,7 @@ export default function GalleryScreen() {
         )}
 
         <MediaViewerModal item={selected} onClose={() => setSelected(null)} />
+        {renameModal}
       </ScreenWrapper>
     );
   }
@@ -289,6 +430,7 @@ export default function GalleryScreen() {
           refreshControl={refreshControl}
         />
       )}
+      {renameModal}
     </ScreenWrapper>
   );
 }
@@ -343,11 +485,76 @@ const dynamicStyles = (colors) => StyleSheet.create({
   folderInfo: {
     padding: Spacing.sm,
   },
+  renameBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   folderHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: Spacing.screenPadding,
     marginBottom: Spacing.md,
+  },
+  folderHeaderBack: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerIconBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: Spacing.xs,
+  },
+
+  // ── Rename modal ────────────────────────────────────────
+  renameBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.xl,
+  },
+  renameCard: {
+    width: '100%',
+    borderRadius: Spacing.radiusMd,
+    backgroundColor: colors.bgCard,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: Spacing.md,
+  },
+  renameInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: Spacing.radiusSm,
+    backgroundColor: colors.bgCardLight,
+    color: colors.textPrimary,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+  },
+  renameActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: Spacing.md,
+  },
+  renameCancel: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginRight: Spacing.sm,
+  },
+  renameSave: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: Spacing.radiusFull,
   },
 
   // ── Grid ────────────────────────────────────────────────

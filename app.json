@@ -16,7 +16,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.airsnap.app",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "AirSnap needs your location to dispatch a drone to you."
+        "NSLocationWhenInUseUsageDescription": "AirSnap needs your location to dispatch a drone to you.",
+        "NSPhotoLibraryAddUsageDescription": "AirSnap saves your delivered photos and videos to your photo library."
       }
     },
     "android": {

@@ -99,12 +99,21 @@ async function deactivatePromo(code) {
  *   - balance type: { type: 'balance', creditsAdded, newBalance }
  *   - discount type: { type: 'discount', amount } — caller applies to an order
  *
+ * Pass `expectType` ('balance' | 'discount') with the context the code is
+ * being used in. If the code's type doesn't match, NOTHING is consumed:
+ *   - a discount code entered where balance was expected (Credits screen)
+ *     returns { type: 'discount', informational: true } so the client can
+ *     tell the user to use it at checkout — redemption stays available;
+ *   - a balance code entered where discount was expected (checkout) throws
+ *     with a friendly pointer to the Credits screen.
+ * Without this guard, a wrong-place attempt burned the one-time redemption.
+ *
  * The caller MUST apply discount amounts immediately (within the same request)
  * since the redemption doc is written inside this transaction — if the caller
  * later abandons the order, the user has "spent" their one-shot redemption.
  * For 'discount' codes, pass an orderId so the redemption record is linked.
  */
-async function redeemPromo(code, uid, { orderId } = {}) {
+async function redeemPromo(code, uid, { orderId, expectType } = {}) {
   const ref = promoRef(code);
   return getDb().runTransaction(async (tx) => {
     const snap = await tx.get(ref);
@@ -123,6 +132,25 @@ async function redeemPromo(code, uid, { orderId } = {}) {
     if (data.oneTimePerUser) {
       const redSnap = await tx.get(redemptionRef(code, uid));
       if (redSnap.exists) throw new Error('You already redeemed this code');
+    }
+
+    // Wrong-place guard — bail out BEFORE writing the redemption so the
+    // code stays usable in the right place.
+    if (expectType && data.type !== expectType) {
+      if (data.type === 'discount') {
+        // Discount code entered in the Credits screen: inform, don't consume.
+        return {
+          type: 'discount',
+          amount: data.amount,
+          code: data.code,
+          informational: true,
+        };
+      }
+      // Balance code entered at checkout: don't consume.
+      throw new Error(
+        `Code ${data.code} adds credit to your balance — redeem it from the ` +
+        'Credits screen; your credits then apply automatically at checkout.',
+      );
     }
 
     // Record redemption + increment counter.

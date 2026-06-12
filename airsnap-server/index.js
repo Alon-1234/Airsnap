@@ -203,15 +203,18 @@ function serializeUser(u, authUser) {
 // ── Promo codes ──────────────────────────────────────────
 
 /**
- * User-facing redeem. For 'balance' codes the credit is applied immediately.
- * For 'discount' codes, the client must place an order with discountCode set
- * within a short window — this endpoint is informational only.
+ * User-facing redeem (Credits screen). For 'balance' codes the credit is
+ * applied immediately. For 'discount' codes nothing is consumed — the
+ * response is informational ("use this at checkout") and the code stays
+ * redeemable when the user actually places an order with it.
  */
 app.post('/promos/redeem', requireAuth, async (req, res) => {
   const code = String(req.body?.code || '').trim().toUpperCase();
   if (!code) return res.status(400).json({ error: 'code required' });
   try {
-    const result = await promoStore.redeemPromo(code, req.user.uid);
+    const result = await promoStore.redeemPromo(code, req.user.uid, {
+      expectType: 'balance',
+    });
     res.json(result);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -312,10 +315,12 @@ app.post('/orders', requireAuth, async (req, res) => {
   let promoCode = null;
   if (discountCode) {
     try {
+      // expectType makes a wrong-type code throw BEFORE the redemption is
+      // consumed (a balance code stays redeemable from the Credits screen).
       const result = await promoStore.redeemPromo(
         String(discountCode).trim().toUpperCase(),
         req.user.uid,
-        { orderId },
+        { orderId, expectType: 'discount' },
       );
       if (result.type === 'discount') {
         promoDiscount = result.amount;

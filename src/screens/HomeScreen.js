@@ -223,10 +223,6 @@ function HomeMapContent({ navigation }) {
   const baseHiveColor = '#0A84FF';
   const focusedHiveColor = '#FF3B30';
   const hiveMarkerColor = currentGuideStepName === 'hiveMarker' ? focusedHiveColor : baseHiveColor;
-  const borderStrokeColor =
-    currentGuideStepName === 'border' ? 'rgba(255,59,48,0.98)' : 'rgba(10,132,255,0.95)';
-  const borderFillColor =
-    currentGuideStepName === 'border' ? 'rgba(255,59,48,0.16)' : 'rgba(10,132,255,0.12)';
 
   const handleGuidePress = useCallback(() => {
     if (!isInsideDeliveryZone) {
@@ -288,24 +284,34 @@ function HomeMapContent({ navigation }) {
           rotateEnabled={false}
           onMapReady={() => setIsMapReady(true)}
         >
-          {hives.map((hive) => (
-            <React.Fragment key={hive.id}>
-              <MapCircle
-                center={hive}
-                radius={DELIVERY_ZONE_RADIUS_METERS}
-                strokeColor={borderStrokeColor}
-                fillColor={borderFillColor}
-                strokeWidth={2}
-              />
-              <Marker coordinate={hive} tracksViewChanges={false}>
-                <DroneHiveMarker
-                  fill={hive.id === nearestHive?.id ? hiveMarkerColor : baseHiveColor}
-                  available={hive.available}
-                  capacity={hive.capacity}
+          {hives.map((hive) => {
+            // Tour highlights apply ONLY to the hive whose zone the user is
+            // inside (the nearest one) — never to every circle on the map.
+            const isNearest = hive.id === nearestHive?.id;
+            const circleFocused = currentGuideStepName === 'border' && isNearest;
+            return (
+              <React.Fragment key={hive.id}>
+                <MapCircle
+                  center={hive}
+                  radius={DELIVERY_ZONE_RADIUS_METERS}
+                  strokeColor={circleFocused ? 'rgba(255,59,48,0.98)' : 'rgba(10,132,255,0.95)'}
+                  fillColor={circleFocused ? 'rgba(255,59,48,0.16)' : 'rgba(10,132,255,0.12)'}
+                  strokeWidth={2}
                 />
-              </Marker>
-            </React.Fragment>
-          ))}
+                {/* tracksViewChanges must stay ON: with it off, iOS rasterizes
+                    the SVG once and existing markers go blank whenever the
+                    marker set changes (the "only the newest hive shows" bug).
+                    It also lets the tour's red highlight actually repaint. */}
+                <Marker coordinate={hive} tracksViewChanges>
+                  <DroneHiveMarker
+                    fill={isNearest ? hiveMarkerColor : baseHiveColor}
+                    available={hive.available}
+                    capacity={hive.capacity}
+                  />
+                </Marker>
+              </React.Fragment>
+            );
+          })}
 
           {userCoords && (
             <Marker coordinate={userCoords} tracksViewChanges={false}>

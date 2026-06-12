@@ -11,28 +11,61 @@
  *
  *  Photos render as a contained Image on a dark backdrop;
  *  videos play immediately with native transport controls
- *  (expo-av).
+ *  (expo-av). The download button (top-left) saves the item
+ *  to the phone's photo library.
  * ============================================================
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Image,
   Modal,
+  Alert,
   StyleSheet,
   TouchableOpacity,
+  ActivityIndicator,
   Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Video, ResizeMode } from 'expo-av';
 
+import { saveMediaToDevice } from '../utils/mediaDownload';
+
 const { width, height } = Dimensions.get('window');
 
 export default function MediaViewerModal({ item, onClose }) {
+  const [saving, setSaving] = useState(false);
+
+  const handleDownload = async () => {
+    if (!item || saving) return;
+    setSaving(true);
+    try {
+      await saveMediaToDevice(item.uri, item.type);
+      Alert.alert('Saved', item.type === 'video' ? 'Video saved to your Photos.' : 'Photo saved to your Photos.');
+    } catch (err) {
+      Alert.alert('Could not save', err.message || 'Unknown error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <Modal visible={!!item} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
+        <TouchableOpacity
+          style={styles.downloadBtn}
+          onPress={handleDownload}
+          disabled={saving}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        >
+          {saving ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Ionicons name="download-outline" size={30} color="#FFFFFF" />
+          )}
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={styles.closeBtn}
           onPress={onClose}
@@ -69,6 +102,16 @@ const styles = StyleSheet.create({
     top: 60,
     right: 20,
     zIndex: 10,
+  },
+  downloadBtn: {
+    position: 'absolute',
+    top: 62,
+    left: 20,
+    zIndex: 10,
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   image: {
     width: width - 40,
