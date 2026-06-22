@@ -26,6 +26,7 @@ const STATUS_LABELS = {
   [DRONE_STATUS.RETURNING]: 'Returning',
   [DRONE_STATUS.PROCESSING]: 'Processing',
   [DRONE_STATUS.DELIVERED]: 'Delivered',
+  cancelled: 'Cancelled',
 };
 
 export default function StatusBadge({ status, style }) {
@@ -40,6 +41,7 @@ export default function StatusBadge({ status, style }) {
     [DRONE_STATUS.RETURNING]: colors.info,
     [DRONE_STATUS.PROCESSING]: colors.warning,
     [DRONE_STATUS.DELIVERED]: colors.success,
+    cancelled: colors.error,
   };
 
   const bg = statusColors[status] || colors.textMuted;

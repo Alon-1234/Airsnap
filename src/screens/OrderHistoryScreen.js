@@ -40,15 +40,20 @@ const ORDERS_KEY = '@airsnap_orders';
 
 function normalizeServerOrder(o) {
   // Server shape -> view shape used by this screen.
+  // An abandoned order has abandonedAt set but no deliveredAt — without
+  // this check it falls through to 'processing' and looks stuck forever.
+  const abandoned = !!o.abandonedAt;
+  const stampMs = o.abandonedAt || o.deliveredAt || o.createdAt;
   return {
     id: o.id,
-    date: o.deliveredAt
-      ? new Date(o.deliveredAt).toISOString().slice(0, 10)
-      : new Date(o.createdAt).toISOString().slice(0, 10),
+    date: new Date(stampMs).toISOString().slice(0, 10),
     site: o.siteName || o.hive?.name || 'Live Location',
     package: o.package?.name || 'Package',
     price: o.package?.price ?? 0,
-    status: o.deliveredAt ? 'delivered' : 'processing',
+    status: abandoned ? 'cancelled' : o.deliveredAt ? 'delivered' : 'processing',
+    abandoned,
+    cancellationFee: o.cancellationFee || 0,
+    refundAmount: o.refundAmount || 0,
     thumbnails: o.media?.photos?.slice(0, 3) || [],
     media: o.media || null,
     hiveName: o.hive?.name || null,
@@ -113,9 +118,26 @@ export default function OrderHistoryScreen({ navigation }) {
       <View style={styles.detailRow}>
         <Ionicons name="pricetag" size={16} color={colors.textMuted} />
         <Text style={[Typography.bodySmall, styles.detailText, { color: colors.textSecondary }]}>
-          {item.package} — ${item.price.toFixed(2)}
+          {item.package} — ₪{item.price.toFixed(2)}
         </Text>
       </View>
+
+      {/* Cancellation receipt — only for abandoned orders */}
+      {item.abandoned && (
+        <View style={[styles.receiptBox, { borderColor: colors.error + '55', backgroundColor: colors.error + '11' }]}>
+          <View style={styles.receiptRow}>
+            <Text style={[Typography.bodySmall, { color: colors.textSecondary }]}>Cancellation fee (10%)</Text>
+            <Text style={[Typography.bodySemibold, { color: colors.error }]}>−₪{item.cancellationFee.toFixed(2)}</Text>
+          </View>
+          <View style={styles.receiptRow}>
+            <Text style={[Typography.bodySmall, { color: colors.textSecondary }]}>Refunded to credits</Text>
+            <Text style={[Typography.bodySemibold, { color: colors.success }]}>+₪{item.refundAmount.toFixed(2)}</Text>
+          </View>
+          <Text style={[Typography.caption, { color: colors.textMuted, marginTop: 4 }]}>
+            Flight cancelled before recording — no footage captured.
+          </Text>
+        </View>
+      )}
 
       {item.thumbnails?.length > 0 && (
         <View style={styles.thumbRow}>
@@ -170,6 +192,18 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   orderCard: { marginBottom: Spacing.md },
+  receiptBox: {
+    marginTop: Spacing.sm,
+    padding: Spacing.sm,
+    borderRadius: Spacing.radiusSm,
+    borderWidth: 1,
+  },
+  receiptRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
