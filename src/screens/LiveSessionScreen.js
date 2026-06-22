@@ -26,6 +26,7 @@ import {
   StyleSheet,
   Dimensions,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -145,13 +146,26 @@ export default function LiveSessionScreen({ navigation, route }) {
     });
   };
 
+  // ── Back button — recording is already paid for, so leaving just
+  //    ends the session early and takes the user to their content. ──
+  const confirmEndEarly = () => {
+    Alert.alert(
+      'End session?',
+      'Stop filming and view your content now? The drone will finish up and head home.',
+      [
+        { text: 'Stay', style: 'cancel' },
+        { text: 'End & view', style: 'destructive', onPress: handleEndEarly },
+      ],
+    );
+  };
+
   const fmt = (secs) =>
     `${Math.floor(secs / 60)}:${String(Math.round(secs) % 60).padStart(2, '0')}`;
   const remaining = Math.max(0, totalSec - elapsedSec);
   const isRecording = droneStatus === DRONE_STATUS.RECORDING;
 
   return (
-    <ScreenWrapper title="Live Session" scroll={false}>
+    <ScreenWrapper title="Live Session" scroll={false} onBack={confirmEndEarly}>
       <View style={styles.liveView}>
         <DroneCameraView droneState={droneState} isRecording={isRecording}>
           <View style={styles.pkgTag}>

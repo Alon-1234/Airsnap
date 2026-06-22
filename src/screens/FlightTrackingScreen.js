@@ -151,8 +151,12 @@ export default function FlightTrackingScreen({ navigation, route }) {
     const sub = navigation.addListener('beforeRemove', (e) => {
       // 1. We've already decided to let this nav through.
       if (allowLeaveRef.current) return;
-      // 2. Forward navigation (Start Session, auto-complete) is fine.
-      if (e.data.action.type !== 'GO_BACK' && e.data.action.type !== 'POP') return;
+      // 2. beforeRemove only fires when this screen is actually being removed
+      //    (forward push/navigate never triggers it), so EVERY removal here is
+      //    a "leave" we must guard — GO_BACK, the back chevron, the swipe
+      //    gesture, and POP_TO_TOP (tapping the active Order tab). The old
+      //    GO_BACK/POP allowlist let POP_TO_TOP slip through silently, leaving
+      //    the drone hovering and the hive slot locked.
       // 3. Drone is past the point of abandonment — let it through.
       const safeToLeave = [
         DRONE_STATUS.RECORDING,
@@ -270,7 +274,7 @@ export default function FlightTrackingScreen({ navigation, route }) {
   };
 
   return (
-    <ScreenWrapper title="Drone on the Way" scroll>
+    <ScreenWrapper title="Drone on the Way" scroll onBack={() => navigation.popToTop()}>
       <StatusBadge status={currentStatus} style={styles.badge} />
 
       <Card style={styles.mapCard}>
