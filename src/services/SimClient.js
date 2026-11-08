@@ -114,27 +114,66 @@ let _client = null;
 function createClient() {
   let socket = null;
   let connectPromise = null;
+  // Order rooms this app has joined. Room membership lives on the
+  // server-side connection, so after ANY reconnect (network blip,
+  // Render restart) we must join again — otherwise drone:state /
+  // order:delivered silently stop arriving and the screen freezes.
+  const joinedOrders = new Set();
+  // True once socket.io exhausted reconnectionAttempts and stopped trying.
+  let gaveUp = false;
 
-  function ensureConnected() {
-    if (socket && socket.connected) return Promise.resolve(socket);
-    if (connectPromise) return connectPromise;
-    connectPromise = new Promise((resolve, reject) => {
-      socket = io(SOCKET_URL, {
+  // One long-lived socket. Listeners are attached to it directly (even
+  // before it connects) so they survive a failed first connect and every
+  // auto-reconnect — never replace it with a new io() instance.
+  function getSocket() {
+    if (!socket) {
+      const s = io(SOCKET_URL, {
         transports: ['websocket'],
         reconnection: true,
         reconnectionAttempts: 8,
         reconnectionDelay: 800,
       });
-      socket.once('connect', () => {
-        connectPromise = null;
-        resolve(socket);
+      s.on('connect', () => {
+        joinedOrders.forEach((orderId) => s.emit('order:join', { orderId }));
       });
-      socket.once('connect_error', (err) => {
-        connectPromise = null;
-        reject(err);
-      });
+      s.io.on('reconnect_failed', () => { gaveUp = true; });
+      socket = s;
+    }
+    return socket;
+  }
+
+  function ensureConnected() {
+    const s = getSocket();
+    if (s.connected) return Promise.resolve(s);
+    if (connectPromise) return connectPromise;
+    const p = new Promise((resolve, reject) => {
+      const cleanup = () => {
+        if (connectPromise === p) connectPromise = null;
+        s.off('connect', onConnect);
+        s.off('connect_error', onError);
+      };
+      const onConnect = () => { cleanup(); resolve(s); };
+      const onError = (err) => { cleanup(); reject(err); };
+      s.on('connect', onConnect);
+      s.on('connect_error', onError);
+      // While socket.io is still (re)connecting on its own, just wait.
+      // Kick a fresh attempt only if it gave up or was disconnected.
+      if (gaveUp || !s.active) {
+        gaveUp = false;
+        s.connect();
+      }
     });
-    return connectPromise;
+    connectPromise = p;
+    return p;
+  }
+
+  // Emit now if connected; otherwise socket.io buffers the packet and
+  // flushes it on connect, so a slow / failed first connect (Render cold
+  // start) can't drop session:start and leave the drone hovering.
+  function emitBuffered(event, payload) {
+    const s = getSocket();
+    if (!s.connected) ensureConnected().catch(() => {});
+    s.emit(event, payload);
   }
 
   return {
@@ -150,22 +189,27 @@ function createClient() {
         socket.disconnect();
         socket = null;
       }
+      joinedOrders.clear();
     },
     async joinOrder(orderId) {
-      const s = await ensureConnected();
-      s.emit('order:join', { orderId });
+      if (!orderId) return;
+      joinedOrders.add(orderId);
+      const s = getSocket();
+      if (s.connected) {
+        s.emit('order:join', { orderId });
+        return;
+      }
+      // The 'connect' handler joins every tracked room.
+      await ensureConnected();
     },
     async sendUserLocation(orderId, latitude, longitude, accuracy) {
-      const s = await ensureConnected();
-      s.emit('user:location', { orderId, latitude, longitude, accuracy });
+      emitBuffered('user:location', { orderId, latitude, longitude, accuracy });
     },
     async startSession(orderId) {
-      const s = await ensureConnected();
-      s.emit('session:start', { orderId });
+      emitBuffered('session:start', { orderId });
     },
     async endSession(orderId) {
-      const s = await ensureConnected();
-      s.emit('session:end', { orderId });
+      emitBuffered('session:end', { orderId });
     },
     onDroneState(cb)        { return _on('drone:state', cb); },
     onOrderStatus(cb)       { return _on('order:status', cb); },
@@ -181,18 +225,13 @@ function createClient() {
     },
   };
 
+  // Attach synchronously: the old version waited for ensureConnected() and
+  // silently dropped the listener if the FIRST connect attempt errored,
+  // even though socket.io kept reconnecting in the background.
   function _on(event, cb) {
-    let active = true;
-    ensureConnected()
-      .then((s) => {
-        if (!active) return;
-        s.on(event, cb);
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-      if (socket) socket.off(event, cb);
-    };
+    const s = getSocket();
+    s.on(event, cb);
+    return () => { s.off(event, cb); };
   }
 }
 

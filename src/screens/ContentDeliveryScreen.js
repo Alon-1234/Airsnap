@@ -91,6 +91,7 @@ export default function ContentDeliveryScreen({ navigation, route }) {
 
   const [media, setMedia] = useState(initialMedia || null);
   const [delivered, setDelivered] = useState(!!initialMedia);
+  const [lookupFailed, setLookupFailed] = useState(false);
   const [viewer, setViewer] = useState(null); // { uri, type } for full-screen view
 
   const spinAnim = useRef(new Animated.Value(0)).current;
@@ -109,7 +110,7 @@ export default function ContentDeliveryScreen({ navigation, route }) {
   }, [spinAnim, delivered]);
 
   useEffect(() => {
-    if (delivered) return;
+    if (delivered || lookupFailed) return;
     let mounted = true;
     const sim = getSimClient();
     sim.connect().catch(() => {});
@@ -121,24 +122,30 @@ export default function ContentDeliveryScreen({ navigation, route }) {
       setDelivered(true);
     });
 
-    // Fallback: if no event after 6 s, poll the server once.
-    const pollTimeout = setTimeout(async () => {
-      if (!mounted || delivered) return;
+    // Fallback poll. The old single poll at 6 s usually ran before the
+    // drone had even landed, so a missed socket event left the spinner up
+    // forever. Keep polling until delivered; stop if the order is gone.
+    const pollInterval = setInterval(async () => {
       try {
         const res = await simApi.getOrder(orderId);
         if (mounted && res?.order?.media) {
           setMedia(res.order.media);
           setDelivered(true);
         }
-      } catch (_) { /* leave spinner */ }
-    }, 6000);
+      } catch (err) {
+        // 404/403: server no longer has this order (in-memory store is
+        // wiped on restart) — nothing will ever arrive.
+        if (mounted && (err.status === 404 || err.status === 403)) setLookupFailed(true);
+        /* otherwise transient — keep polling */
+      }
+    }, 5000);
 
     return () => {
       mounted = false;
       offDelivered();
-      clearTimeout(pollTimeout);
+      clearInterval(pollInterval);
     };
-  }, [orderId, delivered]);
+  }, [orderId, delivered, lookupFailed]);
 
   useEffect(() => {
     if (!delivered || !media) return;
@@ -167,8 +174,18 @@ export default function ContentDeliveryScreen({ navigation, route }) {
             </Animated.View>
             <Text style={[Typography.h2, { color: colors.textPrimary }, styles.title]}>Processing Content…</Text>
             <Text style={[Typography.body, { color: colors.textSecondary }, styles.subtitle]}>
-              Your aerial footage is being enhanced and packaged. This usually takes a moment.
+              {lookupFailed
+                ? 'This flight is no longer available on the server, so its footage can\'t be delivered.'
+                : 'Your aerial footage is being enhanced and packaged. This usually takes a moment.'}
             </Text>
+            {lookupFailed && (
+              <GradientButton
+                title="Back to Home"
+                icon="home"
+                onPress={() => navigation.popToTop()}
+                style={styles.galleryBtn}
+              />
+            )}
           </>
         ) : (
           <>
@@ -240,7 +257,7 @@ export default function ContentDeliveryScreen({ navigation, route }) {
               <View style={styles.summaryRow}>
                 <Ionicons name={pkg.icon} size={18} color={colors.accent} />
                 <Text style={[Typography.bodySmall, { color: colors.textSecondary }, styles.summaryText]}>
-                  {pkg.name} — ${pkg.price.toFixed(2)}
+                  {pkg.name} — ₪{pkg.price.toFixed(2)}
                 </Text>
               </View>
             </Card>

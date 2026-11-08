@@ -87,26 +87,37 @@ function HomeMapContent({ navigation }) {
   // ── Live hives from server ──────────────────────────────
   useEffect(() => {
     let mounted = true;
-    (async () => {
+    const loadHives = async () => {
       try {
         const res = await simApi.listHives();
         if (mounted) setHives(res.hives || []);
       } catch (_) { /* offline → empty list, geofence will say "no hives" */ }
-    })();
+    };
+    loadHives();
 
     const sim = getSimClient();
     sim.connect().catch(() => {});
+    // Re-fetch on every (re)connect: if the first fetch failed (offline /
+    // Render cold start) the map otherwise stayed empty until an app
+    // restart, and create/delete events sent while disconnected are lost.
+    const offConn = sim.onConnectionChange((connected) => {
+      if (connected) loadHives();
+    });
     const offCreate = sim.onHiveCreated((hive) => {
       setHives((prev) => (prev.some((h) => h.id === hive.id) ? prev : [...prev, hive]));
     });
     const offUpdate = sim.onHiveUpdated((hive) => {
-      setHives((prev) => prev.map((h) => (h.id === hive.id ? hive : h)));
+      // Upsert — an update for a hive we missed being created still shows.
+      setHives((prev) => (prev.some((h) => h.id === hive.id)
+        ? prev.map((h) => (h.id === hive.id ? hive : h))
+        : [...prev, hive]));
     });
     const offDelete = sim.onHiveDeleted(({ id }) => {
       setHives((prev) => prev.filter((h) => h.id !== id));
     });
     return () => {
       mounted = false;
+      offConn();
       offCreate();
       offUpdate();
       offDelete();

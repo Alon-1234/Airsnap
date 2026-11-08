@@ -12,6 +12,7 @@
  * ============================================================
  */
 
+import './web-shims/polyfills'; // web-only fixes (no-op on phones)
 import React from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ThemeProvider, AuthProvider, LocationProvider, TourProvider } from './src/context';

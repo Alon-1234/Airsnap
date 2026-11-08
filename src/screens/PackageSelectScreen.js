@@ -110,7 +110,7 @@ export default function PackageSelectScreen({ navigation, route }) {
                 </View>
 
                 <Text style={[Typography.h3, styles.pkgPrice, { color: colors.textPrimary }]}>
-                  ${pkg.price.toFixed(2)}
+                  ₪{pkg.price.toFixed(2)}
                 </Text>
               </View>
 
@@ -150,7 +150,7 @@ export default function PackageSelectScreen({ navigation, route }) {
       })}
 
       <GradientButton
-        title={`Continue — $${selectedPkg?.price.toFixed(2)}`}
+        title={`Continue — ₪${selectedPkg?.price.toFixed(2)}`}
         icon="arrow-forward"
         onPress={handleContinue}
         style={styles.continueBtn}

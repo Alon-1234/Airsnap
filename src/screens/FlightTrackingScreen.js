@@ -189,7 +189,20 @@ export default function FlightTrackingScreen({ navigation, route }) {
                   [{ text: 'OK', onPress: () => navigation.dispatch(e.data.action) }],
                 );
               } catch (err) {
-                Alert.alert('Could not abandon', err.message || 'Unknown error');
+                // Without an escape hatch the guard trapped the user here
+                // forever when abandon can't succeed (server restarted →
+                // 404 order / 409 no active drone, or offline).
+                Alert.alert('Could not abandon', err.message || 'Unknown error', [
+                  { text: 'Stay', style: 'cancel' },
+                  {
+                    text: 'Leave anyway',
+                    style: 'destructive',
+                    onPress: () => {
+                      allowLeaveRef.current = true;
+                      navigation.dispatch(e.data.action);
+                    },
+                  },
+                ]);
               }
             },
           },

@@ -13,7 +13,7 @@
  * ============================================================
  */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -85,6 +85,18 @@ export default function TermsAcceptanceScreen() {
     if (atBottom) setScrolledToEnd(true);
   };
 
+  // onScroll never fires when the text fits without scrolling (tablet /
+  // big screen / browser) — the user could then never accept. Treat
+  // "content fits in the viewport" as already scrolled to the end.
+  const viewportHRef = useRef(0);
+  const contentHRef = useRef(0);
+  const checkFits = () => {
+    if (viewportHRef.current > 0 && contentHRef.current > 0 &&
+        contentHRef.current <= viewportHRef.current + 40) {
+      setScrolledToEnd(true);
+    }
+  };
+
   // ── Accept handler ────────────────────────────────────
   const handleAccept = async () => {
     if (checked) await acceptTerms();
@@ -112,6 +124,8 @@ export default function TermsAcceptanceScreen() {
           style={ds.termsScroll}
           onScroll={handleScroll}
           scrollEventThrottle={200}
+          onLayout={(e) => { viewportHRef.current = e.nativeEvent.layout.height; checkFits(); }}
+          onContentSizeChange={(w, h) => { contentHRef.current = h; checkFits(); }}
         >
           <Text style={ds.termsText}>{TERMS_TEXT}</Text>
         </ScrollView>

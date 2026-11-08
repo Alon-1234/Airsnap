@@ -2,13 +2,14 @@
  * Sim server endpoints.
  *
  * Production = Render deployment (always reachable, HTTPS, WSS).
- * For local dev with a LAN-connected phone, swap the values below
- * for `http://<laptop LAN IP>:4000`.
+ *
+ * To point the app at a server running on your laptop instead, start
+ * it with the launcher in local mode (start.bat local), or set
+ * EXPO_PUBLIC_API_URL=http://<laptop LAN IP>:4000 before `expo start`.
+ * Expo bakes EXPO_PUBLIC_* values into the bundle at start-up.
  */
 
-export const API_BASE_URL = 'https://airsnap-faeg.onrender.com';
-export const SOCKET_URL = API_BASE_URL;
+const PRODUCTION_URL = 'https://airsnap-faeg.onrender.com';
 
-// Legacy exports kept for backwards compatibility.
-export const SERVER_IP = 'airsnap-faeg.onrender.com';
-export const SERVER_PORT = 443;
+export const API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL || PRODUCTION_URL).replace(/\/+$/, '');
+export const SOCKET_URL = API_BASE_URL;

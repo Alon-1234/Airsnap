@@ -20,7 +20,7 @@
  * ============================================================
  */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -63,8 +63,71 @@ export default function PaymentScreen({ navigation, route }) {
     isAdmin: !!me?.isAdmin,
   });
 
+  // Ref guard: `placing` state only updates on the next render, so two
+  // quick taps could both pass the check and create two orders/drones.
+  const placingRef = useRef(false);
+  const finishPlacing = () => {
+    placingRef.current = false;
+    setPlacing(false);
+  };
+
+  const goToTracking = (orderId, hive) => {
+    navigation.navigate('FlightTracking', {
+      latitude, longitude, siteName,
+      package: selectedPkg, paymentMethod: paymentId,
+      orderId, hive,
+    });
+  };
+
+  // The server dispatches the drone as soon as the order is created, so an
+  // unpaid (awaiting_card) order we walk away from must be abandoned —
+  // otherwise the drone hovers at the user forever and the hive slot stays
+  // locked.
+  const cancelUnpaidOrder = async (orderId) => {
+    try { await simApi.abandonOrder(orderId); } catch (_) { /* best-effort */ }
+    refreshMe();
+    finishPlacing();
+  };
+
+  const promptCardPayment = (orderId, cardCharge, hive) => {
+    // Stop-gap until Meshulam: confirm the card charge cleared.
+    // Real flow would launch the Meshulam SDK here, then call confirmPayment()
+    // (or rely on the /payments/webhook flip).
+    Alert.alert(
+      'Confirm payment',
+      `Card charge: ${fmt(cardCharge)}. Tap "Pay" to simulate a successful Meshulam capture.`,
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => cancelUnpaidOrder(orderId) },
+        {
+          text: 'Pay',
+          onPress: async () => {
+            try {
+              await simApi.confirmPayment(orderId);
+            } catch (err) {
+              Alert.alert(
+                'Payment failed',
+                err.message || 'Unknown error',
+                [
+                  { text: 'Cancel order', style: 'cancel', onPress: () => cancelUnpaidOrder(orderId) },
+                  { text: 'Retry', onPress: () => promptCardPayment(orderId, cardCharge, hive) },
+                ],
+                { cancelable: false },
+              );
+              return;
+            }
+            refreshMe();
+            goToTracking(orderId, hive);
+            finishPlacing();
+          },
+        },
+      ],
+      { cancelable: false },
+    );
+  };
+
   const handlePlaceOrder = async () => {
-    if (placing) return;
+    if (placingRef.current) return;
+    placingRef.current = true;
     setPlacing(true);
     try {
       const orderRes = await simApi.createOrder({
@@ -82,47 +145,18 @@ export default function PaymentScreen({ navigation, route }) {
       refreshMe();
 
       if (paymentStatus === 'paid' || adminFree) {
-        navigation.navigate('FlightTracking', {
-          latitude, longitude, siteName,
-          package: selectedPkg, paymentMethod: paymentId,
-          orderId, hive,
-        });
+        goToTracking(orderId, hive);
+        // Reset so the button isn't stuck on "Placing order…" if the user
+        // abandons from FlightTracking via hardware back and lands here.
+        finishPlacing();
         return;
       }
 
-      // Stop-gap until Meshulam: confirm the card charge cleared.
-      // Real flow would launch the Meshulam SDK here, then call confirmPayment()
-      // (or rely on the /payments/webhook flip).
-      Alert.alert(
-        'Confirm payment',
-        `Card charge: ${fmt(cardCharge)}. Tap "Pay" to simulate a successful Meshulam capture.`,
-        [
-          { text: 'Cancel', style: 'cancel', onPress: () => setPlacing(false) },
-          {
-            text: 'Pay',
-            onPress: async () => {
-              try {
-                await simApi.confirmPayment(orderId);
-                refreshMe();
-                navigation.navigate('FlightTracking', {
-                  latitude, longitude, siteName,
-                  package: selectedPkg, paymentMethod: paymentId,
-                  orderId, hive,
-                });
-              } catch (err) {
-                Alert.alert('Payment failed', err.message || 'Unknown error');
-              } finally {
-                setPlacing(false);
-              }
-            },
-          },
-        ],
-        { cancelable: false },
-      );
+      promptCardPayment(orderId, cardCharge, hive);
       return;
     } catch (err) {
       Alert.alert('Could not place order', err.message || 'Unknown error');
-      setPlacing(false);
+      finishPlacing();
     }
   };
 

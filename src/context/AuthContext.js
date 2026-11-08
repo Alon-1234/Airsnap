@@ -16,7 +16,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initializeApp, getApps } from 'firebase/app';
 import {
@@ -185,6 +185,9 @@ export function AuthProvider({ children }) {
       const credential = GoogleAuthProvider.credential(idToken, accessToken);
       signInWithCredential(firebaseAuth, credential).catch((err) => {
         console.log('Google sign-in error:', friendlyError(err));
+        // Previously only logged — the user saw the browser close and
+        // then nothing at all.
+        Alert.alert('Google Sign In', friendlyError(err));
       });
     }
   }, [googleResponse]);
@@ -235,9 +238,11 @@ export function AuthProvider({ children }) {
 
   const reloadUser = async () => {
     const current = firebaseAuth.currentUser;
-    if (!current) return;
+    if (!current) return null;
     await current.reload();
-    setUser(mapFirebaseUser(firebaseAuth.currentUser));
+    const mapped = mapFirebaseUser(firebaseAuth.currentUser);
+    setUser(mapped);
+    return mapped;
   };
 
   const signInWithGoogle = async () => {

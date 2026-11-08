@@ -45,7 +45,7 @@ function formatExpiry(ms) {
 }
 
 export default function PromoCodeAdminScreen({ navigation }) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const ds = dynamicStyles(colors);
 
   const [passInput, setPassInput] = useState('');
@@ -118,7 +118,7 @@ export default function PromoCodeAdminScreen({ navigation }) {
     return (
       <ScreenWrapper title="Promo Codes" onBack={() => navigation.goBack()} scroll={false}>
         <View style={ds.lockCenter}>
-          <BlurView intensity={20} tint={colors.bgDark === '#FFFFFF' ? 'light' : 'dark'} style={ds.lockBlur} />
+          <BlurView intensity={20} tint={isDark ? 'dark' : 'light'} style={ds.lockBlur} />
           <View style={ds.lockCard}>
             <LinearGradient
               colors={[colors.gradientStart, colors.gradientEnd]}

@@ -46,7 +46,14 @@ export default function EmailVerificationScreen() {
   const handleCheck = async () => {
     setChecking(true);
     try {
-      await reloadUser();
+      // If verified, the navigator swaps this screen out on its own. If not
+      // (or the reload failed) the button used to silently do nothing.
+      const refreshed = await reloadUser();
+      if (refreshed && !refreshed.emailVerified) {
+        Alert.alert('Not verified yet', 'Open the link in the verification email, then tap continue again.');
+      }
+    } catch (err) {
+      Alert.alert('Could not check', err.message || 'Please try again in a moment.');
     } finally {
       setChecking(false);
     }

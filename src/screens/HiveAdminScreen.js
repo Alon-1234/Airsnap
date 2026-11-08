@@ -87,7 +87,10 @@ export default function HiveAdminScreen({ navigation }) {
       setHives((prev) => (prev.some((h) => h.id === hive.id) ? prev : [...prev, hive]));
     });
     const offUpdate = sim.onHiveUpdated((hive) => {
-      setHives((prev) => prev.map((h) => (h.id === hive.id ? hive : h)));
+      // Upsert — recovers the list if the initial GET /hives failed.
+      setHives((prev) => (prev.some((h) => h.id === hive.id)
+        ? prev.map((h) => (h.id === hive.id ? hive : h))
+        : [...prev, hive]));
     });
     const offDelete = sim.onHiveDeleted(({ id }) => {
       setHives((prev) => prev.filter((h) => h.id !== id));

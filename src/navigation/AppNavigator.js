@@ -72,7 +72,9 @@ function AuthStackNavigator() {
     <AuthStack.Navigator
       screenOptions={{
         headerShown: false,
-        cardStyle: { backgroundColor: colors.bgDark },
+        // flex:1 keeps each screen viewport-sized on web (otherwise the
+        // stack lets the page grow and scroll); no effect on phones.
+        cardStyle: { flex: 1, backgroundColor: colors.bgDark },
       }}
     >
       <AuthStack.Screen name="Login" component={LoginScreen} />
@@ -92,7 +94,9 @@ function HomeStackNavigator() {
     <HomeStack.Navigator
       screenOptions={{
         headerShown: false,
-        cardStyle: { backgroundColor: colors.bgDark },
+        // flex:1 keeps each screen viewport-sized on web (otherwise the
+        // stack lets the page grow and scroll); no effect on phones.
+        cardStyle: { flex: 1, backgroundColor: colors.bgDark },
       }}
     >
       <HomeStack.Screen name="Home" component={HomeScreen} />
@@ -115,7 +119,9 @@ function ProfileStackNavigator() {
     <ProfileStack.Navigator
       screenOptions={{
         headerShown: false,
-        cardStyle: { backgroundColor: colors.bgDark },
+        // flex:1 keeps each screen viewport-sized on web (otherwise the
+        // stack lets the page grow and scroll); no effect on phones.
+        cardStyle: { flex: 1, backgroundColor: colors.bgDark },
       }}
     >
       <ProfileStack.Screen name="ProfileMain" component={ProfileScreen} />
@@ -195,7 +201,7 @@ export default function AppNavigator() {
 
   return (
     <NavigationContainer>
-      <RootStack.Navigator screenOptions={{ headerShown: false }}>
+      <RootStack.Navigator screenOptions={{ headerShown: false, cardStyle: { flex: 1 } }}>
         {!hasAcceptedTerms ? (
           /* ── Step 1: Must accept terms first ──────────── */
           <RootStack.Screen name="TermsAcceptance" component={TermsAcceptanceScreen} />

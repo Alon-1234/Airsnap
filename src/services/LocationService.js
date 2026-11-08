@@ -23,6 +23,7 @@ class LocationService {
   constructor() {
     this.listeners = new Set();
     this.watchSubscription = null;
+    this.startPromise = null;
     this.lastEmitAt = 0;
     this.lastCoords = null;
     this.options = DEFAULT_OPTIONS;
@@ -73,7 +74,17 @@ class LocationService {
 
   async startTracking(customOptions = {}) {
     if (this.watchSubscription) return;
+    // Concurrent callers (provider mount + "Grant GPS Permission" tap while
+    // the permission prompt is still open) each used to reach
+    // watchPositionAsync, leaking an extra watcher. Share one start.
+    if (this.startPromise) return this.startPromise;
+    this.startPromise = this._startTracking(customOptions).finally(() => {
+      this.startPromise = null;
+    });
+    return this.startPromise;
+  }
 
+  async _startTracking(customOptions) {
     this.options = {
       ...DEFAULT_OPTIONS,
       ...customOptions,

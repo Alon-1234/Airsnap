@@ -76,16 +76,14 @@ export default function LiveSessionScreen({ navigation, route }) {
     const sim = getSimClient();
     let mounted = true;
 
-    (async () => {
-      try {
-        await sim.connect();
-        await sim.joinOrder(orderId);
-        if (!sessionStartedRef.current) {
-          await sim.startSession(orderId);
-          sessionStartedRef.current = true;
-        }
-      } catch (_) { /* ignore */ }
-    })();
+    // Not gated on connect() succeeding: if the first connect attempt
+    // failed (Render cold start) the old code never sent session:start and
+    // the drone hovered forever. startSession is buffered until connected.
+    sim.joinOrder(orderId).catch(() => {});
+    if (!sessionStartedRef.current) {
+      sessionStartedRef.current = true;
+      sim.startSession(orderId).catch(() => {});
+    }
 
     const offState = sim.onDroneState((state) => {
       if (!mounted || state.orderId !== orderId) return;
@@ -125,8 +123,12 @@ export default function LiveSessionScreen({ navigation, route }) {
       droneStatus === DRONE_STATUS.PROCESSING ||
       droneStatus === DRONE_STATUS.DELIVERED
     ) {
-      navigatedRef.current = true;
+      // Mark navigated only when the timer actually fires — if the status
+      // changes within 1.2 s the cleanup clears this timer, and setting the
+      // flag up-front meant the re-run bailed and never navigated.
       const t = setTimeout(() => {
+        if (navigatedRef.current) return;
+        navigatedRef.current = true;
         navigation.navigate('ContentDelivery', {
           orderId, package: pkg, siteName, hive,
           media: deliveredMediaRef.current,
@@ -138,6 +140,9 @@ export default function LiveSessionScreen({ navigation, route }) {
 
   // ── End-session-early — tell the server, then navigate ──
   const handleEndEarly = () => {
+    // Also stops the auto-navigate effect from navigating a second time
+    // when the drone flips to RETURNING right after this.
+    navigatedRef.current = true;
     const sim = getSimClient();
     sim.endSession(orderId).catch(() => {});
     navigation.navigate('ContentDelivery', {
@@ -158,6 +163,21 @@ export default function LiveSessionScreen({ navigation, route }) {
       ],
     );
   };
+
+  // Hardware back / swipe / tapping the Order tab used to drop the user back
+  // on the stale FlightTracking screen mid-recording (content never reached
+  // the Gallery). Route them through the same confirm as the back chevron.
+  // Once we're heading to ContentDelivery, removal is allowed.
+  const confirmEndEarlyRef = useRef(null);
+  confirmEndEarlyRef.current = confirmEndEarly;
+  useEffect(() => {
+    const sub = navigation.addListener('beforeRemove', (e) => {
+      if (navigatedRef.current) return;
+      e.preventDefault();
+      confirmEndEarlyRef.current?.();
+    });
+    return sub;
+  }, [navigation]);
 
   const fmt = (secs) =>
     `${Math.floor(secs / 60)}:${String(Math.round(secs) % 60).padStart(2, '0')}`;
