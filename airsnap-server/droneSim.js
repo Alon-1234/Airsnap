@@ -13,7 +13,8 @@
  *  State machine:
  *    PENDING (1 s)
  *      -> EN_ROUTE      (climb to cruise alt, fly to user target)
- *      -> ARRIVED       (hover at user, wait for session:start)
+ *      -> ARRIVED       (hover at user, wait for session:start;
+ *                        gives up after ARRIVED_TIMEOUT_SEC → RETURNING)
  *      -> RECORDING     (orbit 15 m around live user GPS)
  *      -> RETURNING     (back to hive)
  *      -> DELIVERED     (done, tick loop stops)
@@ -38,6 +39,14 @@ const RECORD_ALT    = 12;           // hover/orbit altitude during recording
 const ORBIT_RADIUS  = 15;           // meters
 const ARRIVAL_TOL_M = 3;            // close-enough threshold
 const HIVE_LAND_TOL = 2;
+
+// Give up hovering at ARRIVED if nobody taps "Start Session" (app closed,
+// payment dialog cancelled…) — otherwise the drone, its 30 Hz loop and its
+// hive slot are held forever.
+const ARRIVED_TIMEOUT_SEC = 5 * 60;
+// Ignore live-GPS fixes this far from the hive (0,0 glitches, spoofed
+// coords) — they would send the drone on a flight that never ends.
+const MAX_TARGET_RANGE_M = 2000;
 
 // Speed floor used for ETA estimates while the drone is still
 // accelerating (or hovering) — without it the ETA reads 0 even
@@ -96,6 +105,8 @@ class Drone {
     this.pendingUntilTick = TICK_HZ * 1;  // 1 s of PENDING
     this.sessionStartTick = null;
     this.recordingEndTick = null;
+    this.arrivedAtTick = null;
+    this.noShow = false;                  // true if ARRIVED timed out (never recorded)
     this.orbitAngle = 0;                  // for circling around user
 
     this.tickCount = 0;
@@ -120,9 +131,13 @@ class Drone {
       this.handle = null;
     }
   }
-  updateUserTarget({ latitude, longitude }) {
-    if (typeof latitude !== 'number' || typeof longitude !== 'number') return;
+  /** Returns true if the fix was accepted. */
+  updateUserTarget({ latitude, longitude } = {}) {
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false;
+    if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return false;
+    if (haversineDistanceMeters(this.hive, { latitude, longitude }) > MAX_TARGET_RANGE_M) return false;
     this.target = { latitude, longitude };
+    return true;
   }
   startSession() {
     if (this.status !== STATUS.ARRIVED) return;
@@ -272,12 +287,21 @@ class Drone {
         const { horizDist } = this._moveToward(desired);
         if (horizDist < ARRIVAL_TOL_M && Math.abs(this.pos.up - RECORD_ALT) < 1.5) {
           this.status = STATUS.ARRIVED;
+          this.arrivedAtTick = this.tickCount;
           this._emitStatus('Drone on-site — ready to record');
         }
         break;
       }
 
       case STATUS.ARRIVED: {
+        if (this.tickCount - this.arrivedAtTick >= ARRIVED_TIMEOUT_SEC * TICK_HZ) {
+          // No-show: fly home without recording (index.js settles it like
+          // an abandon — no media).
+          this.noShow = true;
+          this.status = STATUS.RETURNING;
+          this._emitStatus('No session started — returning to hive');
+          break;
+        }
         // Hover at target. Once we're basically there and slow, snap and
         // hold — otherwise residual velocity makes the drone bounce around
         // the hover point forever.

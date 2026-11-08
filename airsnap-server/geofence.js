@@ -26,7 +26,9 @@ function haversineDistanceMeters(a, b) {
  */
 function llToEnuMeters(origin, point) {
   const dLat = toRadians(point.latitude - origin.latitude);
-  const dLng = toRadians(point.longitude - origin.longitude);
+  // Wrap to [-180, 180) so points across the antimeridian stay local
+  // (haversine already handles this; the ENU frame must agree with it).
+  const dLng = toRadians(((point.longitude - origin.longitude + 540) % 360) - 180);
   const meanLat = toRadians((origin.latitude + point.latitude) / 2);
   return {
     east: EARTH_RADIUS_METERS * dLng * Math.cos(meanLat),

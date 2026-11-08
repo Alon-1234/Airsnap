@@ -6,7 +6,7 @@
  *
  *  Reads policy from env vars on first import:
  *    SIGNUP_BONUS_NIS      (default 5)
- *    SIGNUP_BONUS_EXPIRES  (ISO date, default 2026-06-30T23:59:59Z)
+ *    SIGNUP_BONUS_EXPIRES  (ISO date, default 2027-12-31T23:59:59Z)
  *    REFERRAL_BONUS_NIS    (default 20)
  *
  *  splitPayment() is the single source of truth for how a total
@@ -18,7 +18,7 @@
 const SIGNUP_BONUS_NIS = Number(process.env.SIGNUP_BONUS_NIS) || 5;
 const REFERRAL_BONUS_NIS = Number(process.env.REFERRAL_BONUS_NIS) || 20;
 const SIGNUP_BONUS_EXPIRES_RAW =
-  process.env.SIGNUP_BONUS_EXPIRES || '2026-06-30T23:59:59Z';
+  process.env.SIGNUP_BONUS_EXPIRES || '2027-12-31T23:59:59Z';
 const SIGNUP_BONUS_EXPIRES_MS = Date.parse(SIGNUP_BONUS_EXPIRES_RAW);
 
 const MAX_SAFE_AMOUNT = 10000;

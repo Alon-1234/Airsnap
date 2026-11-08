@@ -84,11 +84,15 @@ async function resolveReferrer(tx, code, newUserUid, newUserEmail) {
 /**
  * Internal — apply a balance delta atomically within a transaction.
  * Writes the ledger entry with balanceAfter, returns the new balance.
+ *
+ * Firestore transactions must do ALL reads before ANY write (the SDK
+ * throws otherwise). Callers that already wrote in this tx must read the
+ * user doc up front and pass it as `prefetchedSnap`.
  */
-async function applyCreditsTx(tx, uid, delta, ledgerEntry) {
+async function applyCreditsTx(tx, uid, delta, ledgerEntry, prefetchedSnap) {
   validateAmount(Math.abs(delta));
   const ref = userRef(uid);
-  const snap = await tx.get(ref);
+  const snap = prefetchedSnap || await tx.get(ref);
   if (!snap.exists) throw new Error(`User ${uid} not found`);
   const current = snap.data().credits || 0;
   const next = round2(current + delta);
@@ -198,17 +202,20 @@ async function markFirstOrderAndPayReferrer(uid) {
     if (!snap.exists) return { firstOrder: false };
     const data = snap.data();
     if (data.hasMadeFirstOrder) return { firstOrder: false };
+    // Read the referrer BEFORE the first write (Firestore tx rule).
+    const referrerSnap = data.referredBy ? await tx.get(userRef(data.referredBy)) : null;
     tx.update(userRef(uid), {
       hasMadeFirstOrder: true,
       updatedAt: getFieldValue().serverTimestamp(),
     });
-    if (!data.referredBy) return { firstOrder: true, referrerCredited: false };
+    // No referrer, or the referrer's account is gone: just flip the flag.
+    if (!referrerSnap || !referrerSnap.exists) return { firstOrder: true, referrerCredited: false };
     // Credit the referrer.
     await applyCreditsTx(tx, data.referredBy, REFERRAL_BONUS_NIS, {
       type: 'referral_bonus',
       referredUserId: uid,
       reason: `Referral bonus — ${data.email || uid} placed their first order`,
-    });
+    }, referrerSnap);
     return { firstOrder: true, referrerCredited: true, referrerUid: data.referredBy };
   });
 }

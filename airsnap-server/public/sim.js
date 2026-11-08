@@ -13,15 +13,17 @@
     attributionControl: true,
   }).setView([31.8312, 35.1286], 13);
 
-  // CartoDB Voyager Dark — sleek, no API key needed.
-  L.tileLayer(
-    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap &copy; CARTO',
-      subdomains: 'abcd',
-    }
-  ).addTo(map);
+  // Esri Dark Gray Canvas — keyless (CARTO basemaps now answer with an
+  // "API KEY REQUIRED" tile). Base + labels overlay; note ESRI's {y}/{x}
+  // path order. Native tiles stop at z16 — Leaflet upscales beyond that.
+  const ESRI_CANVAS = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/';
+  const esriCanvasOpts = {
+    maxNativeZoom: 16,
+    maxZoom: 20,
+    attribution: 'Tiles &copy; Esri',
+  };
+  L.tileLayer(ESRI_CANVAS + 'World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', esriCanvasOpts).addTo(map);
+  L.tileLayer(ESRI_CANVAS + 'World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}', esriCanvasOpts).addTo(map);
 
   // ── State stores ────────────────────────────────────────
   const hives = new Map();      // id  -> { marker, data }
@@ -52,7 +54,7 @@
 
   function makeDroneIcon(state) {
     const deg = ((state.heading || 0) * 180) / Math.PI;
-    const low = (state.battery || 100) < 40;
+    const low = (state.battery ?? 100) < 40;   // `|| 100` read 0% as full
     return L.divIcon({
       className: '',
       html:
@@ -178,7 +180,8 @@
 
   // ── Hive rendering on map ───────────────────────────────
   function upsertHive(hive) {
-    const tooltip = (hive.name || 'Hive') + ' — ' + (hive.available ?? 0) + '/' + (hive.capacity ?? 1) + ' ready';
+    // Leaflet tooltips render HTML — escape the (admin-entered) name.
+    const tooltip = escapeHtml(hive.name || 'Hive') + ' — ' + (hive.available ?? 0) + '/' + (hive.capacity ?? 1) + ' ready';
     const existing = hives.get(hive.id);
     if (existing) {
       existing.marker.setLatLng([hive.latitude, hive.longitude]);
@@ -336,18 +339,26 @@
 
     if (state.status === 'delivered') {
       setTimeout(() => {
-        if (!entry) return;
-        if (camOrderId === state.orderId) closeDroneCam();
-        map.removeLayer(entry.marker);
-        map.removeLayer(entry.trail);
-        map.removeLayer(entry.line);
-        drones.delete(state.orderId);
-        const u = userMarkers.get(state.orderId);
-        if (u) { map.removeLayer(u); userMarkers.delete(state.orderId); }
+        // Skip if a reconnect already wiped (or re-created) this entry.
+        if (drones.get(state.orderId) !== entry) return;
+        removeDrone(state.orderId);
         rerender();
       }, 5000);
     }
     rerender();
+  }
+
+  function removeDrone(orderId) {
+    const entry = drones.get(orderId);
+    if (entry) {
+      if (camOrderId === orderId) closeDroneCam();
+      map.removeLayer(entry.marker);
+      map.removeLayer(entry.trail);
+      map.removeLayer(entry.line);
+      drones.delete(orderId);
+    }
+    const u = userMarkers.get(orderId);
+    if (u) { map.removeLayer(u); userMarkers.delete(orderId); }
   }
 
   function setUser(orderId, latitude, longitude) {
@@ -366,6 +377,12 @@
   socket.on('connect', () => {
     document.getElementById('conn-dot').classList.remove('off');
     document.getElementById('conn-text').textContent = 'connected';
+    // On a REconnect, drop drones we tracked before: any that finished
+    // while we were offline never sent us 'delivered' and would linger
+    // forever. hello:viewer re-sends every live drone.
+    for (const orderId of Array.from(drones.keys())) removeDrone(orderId);
+    for (const orderId of Array.from(userMarkers.keys())) removeDrone(orderId);
+    rerender();
     socket.emit('hello:viewer');
   });
   socket.on('disconnect', () => {
@@ -374,6 +391,9 @@
   });
 
   socket.on('hives:snapshot', ({ hives: list }) => {
+    // Snapshot is authoritative — prune hives deleted while disconnected.
+    const live = new Set(list.map((h) => h.id));
+    for (const id of Array.from(hives.keys())) if (!live.has(id)) removeHive(id);
     list.forEach(upsertHive);
   });
   socket.on('hive:created', upsertHive);
@@ -383,7 +403,9 @@
   socket.on('drone:state', upsertDrone);
 
   socket.on('user:location', ({ orderId, latitude, longitude }) => {
-    setUser(orderId, latitude, longitude);
+    // Only for drones we're drawing — otherwise a late fix after the
+    // drone's marker was removed leaves an orphan user dot forever.
+    if (drones.has(orderId)) setUser(orderId, latitude, longitude);
   });
 
   socket.on('order:status', ({ orderId, status }) => {

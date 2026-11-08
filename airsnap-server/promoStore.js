@@ -16,7 +16,7 @@
  */
 
 const { getDb, getFieldValue } = require('./auth');
-const { applyCreditsTx } = require('./userStore');
+const { applyCreditsTx, userRef } = require('./userStore');
 const { validateAmount } = require('./credits');
 
 const PROMO_TYPES = ['balance', 'discount'];
@@ -153,6 +153,10 @@ async function redeemPromo(code, uid, { orderId, expectType } = {}) {
       );
     }
 
+    // Firestore transactions must do every read before the first write, so
+    // fetch the user doc now for balance codes (applyCreditsTx reuses it).
+    const userSnap = data.type === 'balance' ? await tx.get(userRef(uid)) : null;
+
     // Record redemption + increment counter.
     tx.set(redemptionRef(code, uid), {
       redeemedAt: getFieldValue().serverTimestamp(),
@@ -167,7 +171,7 @@ async function redeemPromo(code, uid, { orderId, expectType } = {}) {
         type: 'promo_redeem',
         promoCode: data.code,
         reason: `Redeemed promo code ${data.code}`,
-      });
+      }, userSnap);
       return {
         type: 'balance',
         creditsAdded: data.amount,

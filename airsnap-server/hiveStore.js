@@ -148,18 +148,28 @@ function snapshot(hive) {
  * Returns { hive: snapshot, merged: bool }.
  */
 function createHive({ name, latitude, longitude, createdBy }) {
-  if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
     throw new Error('latitude and longitude must be numbers');
   }
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) {
+    throw new Error('latitude must be within ±90 and longitude within ±180');
+  }
 
+  // Merge into the NEAREST hive in range, not just the first one found.
+  let nearest = null;
+  let nearestDist = Infinity;
   for (const existing of hives.values()) {
     const d = haversineDistanceMeters({ latitude, longitude }, existing);
-    if (d <= MERGE_RADIUS_METERS) {
-      existing.drones.push(makeDrone(existing.id, existing.drones.length + 1));
-      existing.updatedAt = Date.now();
-      persistHive(existing);
-      return { hive: snapshot(existing), merged: true };
+    if (d <= MERGE_RADIUS_METERS && d < nearestDist) {
+      nearest = existing;
+      nearestDist = d;
     }
+  }
+  if (nearest) {
+    nearest.drones.push(makeDrone(nearest.id, nearest.drones.length + 1));
+    nearest.updatedAt = Date.now();
+    persistHive(nearest);
+    return { hive: snapshot(nearest), merged: true };
   }
 
   const id = genHiveId();

@@ -15,10 +15,18 @@
 const orders = new Map();
 let counter = 1;
 
+/**
+ * ORD-YYYYMMDD-XXXXXXXX. The suffix is the base36 ms clock (6 chars —
+ * wraps every ~25 days, so unique within a date) + a 2-char base36
+ * in-process counter. A plain counter reset on every Render restart and
+ * re-issued IDs, which the app's orderId de-dup then silently dropped.
+ */
 function genOrderId() {
   const d = new Date();
   const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-  return `ORD-${stamp}-${String(counter++).padStart(3, '0')}`;
+  const clock = d.getTime().toString(36).slice(-6);
+  const seq = (counter++ % 1296).toString(36).padStart(2, '0');
+  return `ORD-${stamp}-${clock}${seq}`.toUpperCase();
 }
 
 function createOrder({

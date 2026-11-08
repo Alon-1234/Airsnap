@@ -65,6 +65,7 @@ const { splitPayment, round2 } = require('./credits');
 const PORT = Number(process.env.PORT) || 4000;
 const DELIVERY_ZONE_RADIUS_METERS = 500;
 const ABANDON_FEE_FRACTION = 0.10;     // 10% cancellation fee
+const MAX_SESSION_SEC = 3600;          // longest package is 900 s
 
 // ── Express app ──────────────────────────────────────────
 const app = express();
@@ -262,8 +263,11 @@ app.post('/orders', requireAuth, async (req, res) => {
   if (typeof targetLat !== 'number' || typeof targetLng !== 'number') {
     return res.status(400).json({ error: 'targetLat and targetLng required' });
   }
-  if (!pkg || typeof pkg.durationSec !== 'number') {
-    return res.status(400).json({ error: 'package.durationSec required' });
+  if (
+    !pkg || typeof pkg.durationSec !== 'number' ||
+    !(pkg.durationSec > 0 && pkg.durationSec <= MAX_SESSION_SEC)
+  ) {
+    return res.status(400).json({ error: `package.durationSec required (0–${MAX_SESSION_SEC} s)` });
   }
   if (typeof pkg.price !== 'number' || pkg.price < 0) {
     return res.status(400).json({ error: 'package.price required' });
@@ -430,6 +434,9 @@ app.post('/orders/:id/confirm-payment', requireAuth, async (req, res) => {
   const order = orderStore.getOrder(req.params.id);
   if (!order) return res.status(404).json({ error: 'Order not found' });
   if (order.userId !== req.user.uid) return res.status(403).json({ error: 'Not your order' });
+  if (order.abandonedAt) {
+    return res.status(409).json({ error: 'Order was abandoned' });
+  }
   if (order.paymentStatus === 'paid') {
     return res.json({ ok: true, alreadyPaid: true, order });
   }
@@ -447,10 +454,11 @@ app.post('/orders/:id/confirm-payment', requireAuth, async (req, res) => {
  * Abandon an order BEFORE recording starts (drone is still en-route or
  * hovering at the customer waiting for the "Start Session" tap).
  *
- * Charges a 10% cancellation fee on the amount already paid; refunds
- * the remaining 90% to the user's credit balance (regardless of original
- * payment method — for the stop-gap card flow we treat any card portion
- * as goodwill credit).
+ * Paid orders: 10% cancellation fee on the amount paid; the remaining 90%
+ * goes back to the user's credit balance (regardless of original payment
+ * method — for the stop-gap card flow we treat any card portion as
+ * goodwill credit). Unpaid orders (user cancelled the card dialog): no
+ * fee, any credits applied are refunded in full.
  *
  * No-ops with 409 if the drone is already recording, returning, or done.
  */
@@ -477,51 +485,57 @@ app.post('/orders/:id/abandon', requireAuth, async (req, res) => {
     });
   }
 
-  // Compute fee on the amount already paid. For orders where cardCharge
-  // hasn't cleared yet (paymentStatus !== 'paid'), only the credit portion
-  // counts as paid — the card was never captured.
-  const paidTotal = order.paymentStatus === 'paid'
-    ? round2((order.creditsApplied || 0) + (order.cardCharge || 0))
-    : round2(order.creditsApplied || 0);
-
-  const cancellationFee = round2(paidTotal * ABANDON_FEE_FRACTION);
-  const refundAmount = round2(paidTotal - cancellationFee);
-
-  let newBalance = null;
-  if (refundAmount > 0 && !req.user.isAdmin) {
-    try {
-      newBalance = await userStore.adminAdjust(
-        req.user.uid,
-        refundAmount,
-        `Refund (90%) — order ${order.id} abandoned`,
-        'system',
-      );
-    } catch (e) {
-      // The drone is already heading home; we still want to mark the order
-      // abandoned so callers don't retry forever. Log and proceed.
-      console.warn(`[abandon] refund failed for ${order.id}:`, e.message);
-    }
-  }
-
-  orderStore.markAbandoned(order.id, { cancellationFee, refundAmount });
-  io.to(`order:${order.id}`).emit('order:abandoned', {
-    orderId: order.id,
-    cancellationFee,
-    refundAmount,
-  });
-  io.to('viewers').emit('order:abandoned', {
-    orderId: order.id,
-    cancellationFee,
-    refundAmount,
-  });
+  const { cancellationFee, refundAmount, newBalance } =
+    await settleAbandonedOrder(order, 'abandoned');
   res.json({
     ok: true,
     cancellationFee,
     refundAmount,
     newBalance,
-    feeFraction: ABANDON_FEE_FRACTION,
+    feeFraction: cancellationFee > 0 ? ABANDON_FEE_FRACTION : 0,
   });
 });
+
+/**
+ * Fee/refund bookkeeping shared by POST /orders/:id/abandon and the
+ * drone's ARRIVED timeout (no-show). Never throws.
+ *
+ * The order is marked abandoned BEFORE the async refund so the delivery
+ * watcher can't race it and hand out media for an abandoned flight.
+ */
+async function settleAbandonedOrder(order, reason) {
+  // Only a cleared card counts as paid; an unpaid order (card dialog
+  // cancelled) owes no fee and gets its reserved credits back in full.
+  const paid = order.paymentStatus === 'paid';
+  const paidTotal = paid
+    ? round2((order.creditsApplied || 0) + (order.cardCharge || 0))
+    : round2(order.creditsApplied || 0);
+  const cancellationFee = paid ? round2(paidTotal * ABANDON_FEE_FRACTION) : 0;
+  const refundAmount = round2(paidTotal - cancellationFee);
+
+  orderStore.markAbandoned(order.id, { cancellationFee, refundAmount });
+
+  let newBalance = null;
+  if (refundAmount > 0) {
+    try {
+      newBalance = await userStore.adminAdjust(
+        order.userId,
+        refundAmount,
+        `${cancellationFee > 0 ? 'Refund (90%)' : 'Refund'} — order ${order.id} ${reason}`,
+        'system',
+      );
+    } catch (e) {
+      // The drone is already heading home; the order stays abandoned so
+      // callers don't retry forever. Log and proceed.
+      console.warn(`[abandon] refund failed for ${order.id}:`, e.message);
+    }
+  }
+
+  const payload = { orderId: order.id, cancellationFee, refundAmount };
+  io.to(`order:${order.id}`).emit('order:abandoned', payload);
+  io.to('viewers').emit('order:abandoned', payload);
+  return { cancellationFee, refundAmount, newBalance };
+}
 
 /**
  * Meshulam will POST here when a card charge clears. Scaffolded — not
@@ -529,10 +543,16 @@ app.post('/orders/:id/abandon', requireAuth, async (req, res) => {
  */
 app.post('/payments/webhook', async (req, res) => {
   // TODO: verify Meshulam HMAC using process.env.MESHULAM_WEBHOOK_SECRET.
+  // Closed until that exists — unauthenticated, it let anyone flip any
+  // order to paid/failed (order IDs are public on the viewer socket).
+  if (!process.env.MESHULAM_WEBHOOK_SECRET) {
+    return res.status(503).json({ error: 'Payments webhook not configured' });
+  }
   const { orderId, status } = req.body || {};
   if (!orderId) return res.status(400).json({ error: 'orderId required' });
   const order = orderStore.getOrder(orderId);
   if (!order) return res.status(404).json({ error: 'Order not found' });
+  if (order.abandonedAt) return res.status(409).json({ error: 'Order was abandoned' });
   if (status === 'paid') {
     orderStore.setPaymentStatus(orderId, 'paid');
     await onPaymentSucceeded(orderId);
@@ -549,6 +569,19 @@ app.get('/', (req, res, next) => {
     return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   }
   next();
+});
+
+// Malformed / oversized JSON bodies: answer in JSON like every other route
+// instead of Express's default HTML page (which includes a stack trace
+// unless NODE_ENV=production).
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = err.status || err.statusCode || 500;
+  if (status >= 500) console.warn('[http] unhandled error:', err.message);
+  res.status(status).json({
+    error: err.type === 'entity.parse.failed' ? 'Malformed JSON body'
+      : status >= 500 ? 'Internal server error' : err.message,
+  });
 });
 
 // ── HTTP + Socket.IO server ──────────────────────────────
@@ -590,7 +623,20 @@ function startDroneForOrder(order, startBattery) {
   drones.set(order.id, drone);
   drone.start();
 
+  let noShowSettled = false;
   const watcher = setInterval(() => {
+    // Drone gave up hovering (nobody started the session): settle it like
+    // an abandon. Runs synchronously up to markAbandoned, so it always
+    // lands before the DELIVERED branch below can hand out media.
+    if (drone.noShow && !noShowSettled) {
+      noShowSettled = true;
+      const current = orderStore.getOrder(order.id);
+      if (current && !current.abandonedAt) {
+        settleAbandonedOrder(current, 'abandoned (no-show)').catch((e) =>
+          console.warn(`[abandon] no-show settle failed for ${order.id}:`, e.message),
+        );
+      }
+    }
     if (drone.status === STATUS.DELIVERED) {
       clearInterval(watcher);
       const current = orderStore.getOrder(order.id);
@@ -643,6 +689,11 @@ setInterval(() => {
 }, 1000);
 
 // ── Socket.IO routing ────────────────────────────────────
+// Client payloads are untrusted: `({ orderId } = {})` only defaults on
+// undefined, so a `null` payload threw inside the handler and crashed the
+// whole process. Always destructure from fields(payload).
+const fields = (payload) => (payload && typeof payload === 'object' ? payload : {});
+
 io.on('connection', (socket) => {
   socket.on('hello:viewer', () => {
     socket.join('viewers');
@@ -650,8 +701,9 @@ io.on('connection', (socket) => {
     for (const drone of drones.values()) socket.emit('drone:state', drone.snapshot());
   });
 
-  socket.on('order:join', ({ orderId } = {}) => {
-    if (!orderId) return;
+  socket.on('order:join', (payload) => {
+    const { orderId } = fields(payload);
+    if (!orderId || typeof orderId !== 'string') return;
     socket.join(`order:${orderId}`);
     const drone = drones.get(orderId);
     if (drone) socket.emit('drone:state', drone.snapshot());
@@ -663,21 +715,23 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('user:location', ({ orderId, latitude, longitude } = {}) => {
+  socket.on('user:location', (payload) => {
+    const { orderId, latitude, longitude } = fields(payload);
     if (!orderId || typeof latitude !== 'number' || typeof longitude !== 'number') return;
     const drone = drones.get(orderId);
     if (!drone) return;
-    drone.updateUserTarget({ latitude, longitude });
-    io.to('viewers').emit('user:location', { orderId, latitude, longitude });
+    if (drone.updateUserTarget({ latitude, longitude })) {
+      io.to('viewers').emit('user:location', { orderId, latitude, longitude });
+    }
   });
 
-  socket.on('session:start', ({ orderId } = {}) => {
-    const drone = drones.get(orderId);
+  socket.on('session:start', (payload) => {
+    const drone = drones.get(fields(payload).orderId);
     if (drone) drone.startSession();
   });
 
-  socket.on('session:end', ({ orderId } = {}) => {
-    const drone = drones.get(orderId);
+  socket.on('session:end', (payload) => {
+    const drone = drones.get(fields(payload).orderId);
     if (drone) drone.endSessionEarly();
   });
 });
