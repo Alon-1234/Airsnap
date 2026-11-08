@@ -1,0 +1,54 @@
+# ============================================================
+#  AirSnap — everything in Docker
+# ============================================================
+#  docker compose up --build        (first build ~5-10 min)
+#    App in the browser:   http://localhost:8081
+#    Live drone viewer:    http://localhost:4000
+#
+#  Settings come from a `.env` file next to this one (the
+#  "Start AirSnap (Docker)" script creates it). Most important:
+#    ADMIN_EMAILS=you@example.com   ← the email you sign in with;
+#                                     admins can place drone hives
+#                                     and order for free.
+#
+#  Data (users, credits, hives, promo codes) is saved in the
+#  "airsnap-data" Docker volume. Sign-in uses the real AirSnap
+#  Firebase accounts, so sign up in the app with any email.
+# ============================================================
+
+name: airsnap
+
+services:
+  server:
+    build: ./airsnap-server
+    init: true
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: "4000"
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-airsnap-7844f}
+      ADMIN_EMAILS: ${ADMIN_EMAILS:-akonk13579@gmail.com}
+      ADMIN_PROMO_PASS: ${ADMIN_PROMO_PASS:-Alon132}
+      # Leave empty to use the built-in local database (saved in the volume).
+      # Set it (base64 service-account JSON) to use real Firestore instead.
+      FIREBASE_SERVICE_ACCOUNT: ${FIREBASE_SERVICE_ACCOUNT:-}
+      LOCAL_DB_FILE: /data/airsnap-db.json
+    volumes:
+      - airsnap-data:/data
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        # auto:4000 = the server container above. Set AIRSNAP_API_URL in .env
+        # to https://airsnap-faeg.onrender.com to use the cloud server instead.
+        EXPO_PUBLIC_API_URL: ${AIRSNAP_API_URL:-auto:4000}
+    init: true
+    ports:
+      - "8081:8081"
+    depends_on:
+      - server
+
+volumes:
+  airsnap-data:

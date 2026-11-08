@@ -118,7 +118,8 @@ with Expo Go to open the app on your phone. Close the window (or press Ctrl+C) t
 | How | What it runs |
 |---|---|
 | `Start AirSnap.bat` · `npm run start:all` · VS Code ▶ "AirSnap: Start everything" | App + cloud server (Render) + viewer |
-| `Start AirSnap (local server).bat` · `npm run start:local` | Same, with the server on this laptop (port 4000). Needs `FIREBASE_SERVICE_ACCOUNT` in `airsnap-server/.env` for credits/orders. |
+| `Start AirSnap (local server).bat` · `npm run start:local` | Same, with the server on this laptop (port 4000) and a local database. |
+| `Start AirSnap (Docker).bat` · `./start-docker.sh` · `docker compose up --build` | Everything in Docker, nothing else to install. See [DOCKER.md](DOCKER.md). |
 
 Options: `--tunnel` (phone on a different network), `--no-browser`.
 

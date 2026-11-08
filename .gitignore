@@ -45,3 +45,6 @@ service-account.json
 
 # Playwright MCP screenshots / logs
 .playwright-mcp/
+
+# Local database used by the launcher local mode
+airsnap-server/.local-db.json*

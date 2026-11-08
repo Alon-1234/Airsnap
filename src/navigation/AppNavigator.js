@@ -29,7 +29,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAuth, useTheme } from '../context';
-import { ADMIN_EMAILS } from '../config/firebaseConfig';
+import { isAdminUser } from '../utils/isAdmin';
 
 // ── Screens ────────────────────────────────────────────────
 import HomeScreen from '../screens/HomeScreen';
@@ -187,7 +187,7 @@ function BottomTabs() {
  *   4. Main app (signed in)
  */
 export default function AppNavigator() {
-  const { user, isLoading, hasAcceptedTerms } = useAuth();
+  const { user, isLoading, hasAcceptedTerms, me } = useAuth();
   const { colors } = useTheme();
 
   // ── Show loading while checking saved auth ────────────
@@ -208,7 +208,7 @@ export default function AppNavigator() {
         ) : !user ? (
           /* ── Step 2: Must sign in ────────────────────── */
           <RootStack.Screen name="Auth" component={AuthStackNavigator} />
-        ) : !user.emailVerified && !ADMIN_EMAILS.includes((user.email || '').toLowerCase()) ? (
+        ) : !user.emailVerified && !isAdminUser(user, me) ? (
           /* ── Step 3: Must verify email (admins bypass) ── */
           <RootStack.Screen name="EmailVerification" component={EmailVerificationScreen} />
         ) : (

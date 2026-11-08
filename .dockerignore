@@ -1,0 +1,19 @@
+# Keep the web build context small — the server has its own context.
+**/node_modules
+.git
+.expo
+.vscode
+.claude
+.playwright-mcp
+dist
+web-build
+android
+ios
+airsnap-server
+assets/book
+*.bat
+*.sh
+.env
+.env.*
+Dockerfile*
+docker-compose*.yml

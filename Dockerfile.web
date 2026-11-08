@@ -1,0 +1,26 @@
+# AirSnap app — browser build, served on :8081
+#
+# Stage 1 builds the Expo web export; stage 2 is a tiny Node static
+# server. EXPO_PUBLIC_API_URL is baked in at build time:
+#   auto:4000  → same machine that served the page, port 4000 (default)
+#   https://…  → a fixed server, e.g. the Render cloud server
+
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY . .
+ARG EXPO_PUBLIC_API_URL=auto:4000
+ENV EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL \
+    EXPO_NO_TELEMETRY=1 \
+    CI=1
+RUN npx expo export --platform web --output-dir dist
+
+FROM node:22-alpine
+WORKDIR /app
+COPY --from=build /app/dist ./dist
+COPY scripts/serve-web.js ./serve-web.js
+EXPOSE 8081
+HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8081/health > /dev/null || exit 1
+CMD ["node", "serve-web.js", "dist", "8081"]

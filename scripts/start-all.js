@@ -223,8 +223,12 @@ async function startLocalServer() {
   env.PORT = String(SERVER_PORT);
 
   if (!fileEnv.FIREBASE_SERVICE_ACCOUNT && !process.env.FIREBASE_SERVICE_ACCOUNT) {
-    warn('No FIREBASE_SERVICE_ACCOUNT in airsnap-server/.env — sign-in works, but credits,');
-    warn('orders and promo codes need it on a local server (see SETUP.md §4).');
+    // No Firestore credentials → use the built-in local database so
+    // credits, orders, promo codes and hives all still work.
+    if (!fileEnv.LOCAL_DB_FILE && !env.LOCAL_DB_FILE) {
+      env.LOCAL_DB_FILE = path.join(SERVER_DIR, '.local-db.json');
+    }
+    ok('No Firebase service account — using the local database (data stays on this laptop)');
   }
 
   step(`Starting the local simulation server on port ${SERVER_PORT}…`);
@@ -348,7 +352,9 @@ function printSummary({ viewerUrl, apiUrl }) {
     openUrl(viewerUrl);
   }
 
-  if (app === 'reused') {
+  // Nothing of ours is running (the app was already up elsewhere) — exit.
+  // If we did start the local server, stay alive so Ctrl+C stops it.
+  if (app === 'reused' && children.length === 0) {
     console.log(c.dim('Opened the already-running app. This window will close in a few seconds.'));
     setTimeout(() => process.exit(0), 5000);
   }

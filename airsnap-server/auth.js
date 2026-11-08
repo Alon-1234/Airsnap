@@ -16,6 +16,7 @@
  *   keys) but Firestore calls will fail.
  */
 
+const path = require('path');
 const admin = require('firebase-admin');
 
 let initialized = false;
@@ -50,22 +51,46 @@ function initFirebase() {
     console.log('[auth] Firebase Admin initialized with service account.');
   } else {
     admin.initializeApp({ projectId });
-    console.warn(
-      '[auth] FIREBASE_SERVICE_ACCOUNT not set — Firestore writes will fail. ' +
-      'ID-token verification still works.',
-    );
+    if (useLocalDb()) {
+      console.log(
+        `[auth] No FIREBASE_SERVICE_ACCOUNT — using the local database (${process.env.LOCAL_DB_FILE}). ` +
+        'Sign-in still uses the real Firebase accounts.',
+      );
+    } else {
+      console.warn(
+        '[auth] FIREBASE_SERVICE_ACCOUNT not set — Firestore writes will fail. ' +
+        'ID-token verification still works. (Set LOCAL_DB_FILE to use a local database instead.)',
+      );
+    }
   }
   initialized = true;
 }
 
+// Local database (localDb.js) instead of Firestore: only when explicitly
+// requested with LOCAL_DB_FILE and there are no Firestore credentials.
+// Production (Render) always has FIREBASE_SERVICE_ACCOUNT, so it never
+// falls back to this silently.
+function useLocalDb() {
+  return !!process.env.LOCAL_DB_FILE && !process.env.FIREBASE_SERVICE_ACCOUNT;
+}
+
+let localDb = null;
+function getLocalDb() {
+  if (!localDb) {
+    const { createLocalDb } = require('./localDb');
+    localDb = createLocalDb({ file: path.resolve(process.env.LOCAL_DB_FILE) });
+  }
+  return localDb;
+}
+
 function getDb() {
   initFirebase();
-  return admin.firestore();
+  return useLocalDb() ? getLocalDb() : admin.firestore();
 }
 
 function getFieldValue() {
   initFirebase();
-  return admin.firestore.FieldValue;
+  return useLocalDb() ? require('./localDb').FieldValue : admin.firestore.FieldValue;
 }
 
 function adminEmails() {

@@ -31,12 +31,12 @@ import { useTheme, useAuth, useLocation } from '../context';
 import { DELIVERY_ZONE_RADIUS_METERS } from '../constants';
 import { haversineDistanceMeters } from '../utils/geofence';
 import { Spacing } from '../theme';
-import { ADMIN_EMAILS } from '../config/firebaseConfig';
+import { isAdminUser } from '../utils/isAdmin';
 import PartnerTab from '../components/Account/PartnerTab';
 
 export default function ProfileScreen({ navigation }) {
   // ── Auth & theme hooks ────────────────────────────────
-  const { user, signOut } = useAuth();
+  const { user, signOut, me } = useAuth();
   const { colors, isDark, toggleTheme } = useTheme();
   const { position } = useLocation();
 
@@ -201,7 +201,7 @@ export default function ProfileScreen({ navigation }) {
             color={colors.warning}
             onPress={() => navigation.navigate('PrivacyTerms')}
           />
-          {user?.email && ADMIN_EMAILS.includes(user.email.toLowerCase()) && (
+          {isAdminUser(user, me) && (
             <>
               <MenuItem
                 icon="business"
