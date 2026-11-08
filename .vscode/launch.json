@@ -1,31 +1,43 @@
 {
+  // Run and Debug panel (Ctrl+Shift+D) → pick a configuration → ▶ (or F5).
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "AirSnap Backend (Python)",
-      "type": "debugpy",
+      "name": "AirSnap: Start everything",
+      "type": "node",
       "request": "launch",
-      "program": "${workspaceFolder}/airsnap-server/server.py",
-      "cwd": "${workspaceFolder}/airsnap-server",
-      "console": "integratedTerminal",
-      "envFile": "${workspaceFolder}/airsnap-server/.env",
-      "justMyCode": true
+      "program": "${workspaceFolder}/scripts/start-all.js",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
     },
     {
-      "name": "AirSnap App (Expo LAN)",
+      "name": "AirSnap: Start everything (local server)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/start-all.js",
+      "args": ["local"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "AirSnap Server only (debug)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/airsnap-server/index.js",
+      "cwd": "${workspaceFolder}/airsnap-server",
+      "env": {
+        "FIREBASE_PROJECT_ID": "airsnap-7844f",
+        "ADMIN_EMAILS": "akonk13579@gmail.com"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "AirSnap App only (Expo)",
       "type": "node-terminal",
       "request": "launch",
-      "command": "npx expo start --lan",
+      "command": "npx expo start",
       "cwd": "${workspaceFolder}"
-    }
-  ],
-  "compounds": [
-    {
-      "name": "AirSnap: App + Backend",
-      "configurations": [
-        "AirSnap Backend (Python)",
-        "AirSnap App (Expo LAN)"
-      ]
     }
   ]
 }

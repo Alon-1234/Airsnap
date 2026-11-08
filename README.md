@@ -107,7 +107,25 @@ Key invariants:
 
 ---
 
-## Quick start
+## Start everything (one click)
+
+Double-click **`Start AirSnap.bat`** (or the **AirSnap** icon on the Desktop, created by
+`scripts/create-desktop-shortcut.ps1`). It installs packages on first run, wakes the
+Render server, starts Expo, and opens two browser tabs: the app at
+http://localhost:8081 and the live drone viewer. Scan the QR code in the window
+with Expo Go to open the app on your phone. Close the window (or press Ctrl+C) to stop.
+
+| How | What it runs |
+|---|---|
+| `Start AirSnap.bat` · `npm run start:all` · VS Code ▶ "AirSnap: Start everything" | App + cloud server (Render) + viewer |
+| `Start AirSnap (local server).bat` · `npm run start:local` | Same, with the server on this laptop (port 4000). Needs `FIREBASE_SERVICE_ACCOUNT` in `airsnap-server/.env` for credits/orders. |
+
+Options: `--tunnel` (phone on a different network), `--no-browser`.
+
+The app also runs **in the browser** (Expo web): maps use a Leaflet stand-in
+([web-shims/](web-shims/)) because `react-native-maps` is mobile-only.
+
+## Quick start (manual)
 
 See [SETUP.md](SETUP.md) for the complete guide. TL;DR:
 
@@ -285,7 +303,7 @@ Detail in [airsnap-server/index.js](airsnap-server/index.js).
 | `ADMIN_EMAILS` | yes | empty | Comma-separated admin emails |
 | `ADMIN_PROMO_PASS` | for promo admin | — | Must match mobile constant; `X-Admin-Pass` header |
 | `SIGNUP_BONUS_NIS` | no | `5` | Welcome credit amount |
-| `SIGNUP_BONUS_EXPIRES` | no | `2026-06-30T23:59:59Z` | After this, no signup bonus |
+| `SIGNUP_BONUS_EXPIRES` | no | `2027-12-31T23:59:59Z` | After this, no signup bonus |
 | `REFERRAL_BONUS_NIS` | no | `20` | Referrer's payout on referee's first paid order |
 | `PORT` | no | `4000` | Render injects this automatically |
 | `MESHULAM_WEBHOOK_SECRET` | future | — | For HMAC validation when wired |

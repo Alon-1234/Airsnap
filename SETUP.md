@@ -183,7 +183,7 @@ On the same Create-Service page (or after creation, under the **Environment** ta
 | `ADMIN_EMAILS` | `you@example.com` | Comma-separated. These accounts get admin powers. |
 | `ADMIN_PROMO_PASS` | `Alon132` | Required as `X-Admin-Pass` header to mint promo codes |
 | `SIGNUP_BONUS_NIS` | `5` | New-user welcome credit |
-| `SIGNUP_BONUS_EXPIRES` | `2026-06-30T23:59:59Z` | When the welcome credit promo ends |
+| `SIGNUP_BONUS_EXPIRES` | `2027-12-31T23:59:59Z` | When the welcome credit promo ends |
 | `REFERRAL_BONUS_NIS` | `20` | Paid to the referrer on their referee's first paid order |
 | `NODE_VERSION` | `20` | Pins Node major version |
 

@@ -42,3 +42,6 @@ service-account.json
 # generated native folders
 /ios
 /android
+
+# Playwright MCP screenshots / logs
+.playwright-mcp/
