@@ -30,7 +30,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Video, ResizeMode } from 'expo-av';
 
-import { saveMediaToDevice } from '../utils/mediaDownload';
+import { saveMediaToDevice, SAVE_DESTINATION } from '../utils/mediaDownload';
 
 const { width, height } = Dimensions.get('window');
 
@@ -42,7 +42,7 @@ export default function MediaViewerModal({ item, onClose }) {
     setSaving(true);
     try {
       await saveMediaToDevice(item.uri, item.type);
-      Alert.alert('Saved', item.type === 'video' ? 'Video saved to your Photos.' : 'Photo saved to your Photos.');
+      Alert.alert('Saved', `${item.type === 'video' ? 'Video' : 'Photo'} saved to your ${SAVE_DESTINATION}.`);
     } catch (err) {
       Alert.alert('Could not save', err.message || 'Unknown error');
     } finally {

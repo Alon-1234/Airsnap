@@ -20,6 +20,10 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 
+// Where saved media ends up — used in "Saved" messages.
+// (The web build's mediaDownload.web.js says "Downloads folder".)
+export const SAVE_DESTINATION = 'Photos';
+
 /**
  * Download `uri` and save it to the user's photo library.
  * type: 'photo' | 'video'. Throws with a friendly message on

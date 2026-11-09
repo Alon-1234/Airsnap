@@ -26,6 +26,7 @@ import MapView, { Marker, Circle as MapCircle } from 'react-native-maps';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useIsFocused } from '@react-navigation/native';
 import {
   CopilotProvider,
   CopilotStep,
@@ -76,6 +77,9 @@ function HomeMapContent({ navigation }) {
   } = useLocation();
   const { start, copilotEvents } = useCopilot();
   const { startTour, endTour } = useTour();
+  // Home stays mounted under the tab bar while other screens are open;
+  // only auto-start the tour when Home is the screen actually shown.
+  const isFocused = useIsFocused();
 
   const FIRST_LAUNCH_KEY = 'tour:home:seen:v2';
   const mapRef = useRef(null);
@@ -245,7 +249,7 @@ function HomeMapContent({ navigation }) {
   }, [isInsideDeliveryZone, startGuide, startTour]);
 
   useEffect(() => {
-    if (autoStartedRef.current || !isMapReady || !isInsideDeliveryZone) return;
+    if (autoStartedRef.current || !isFocused || !isMapReady || !isInsideDeliveryZone) return;
     let cancelled = false;
     (async () => {
       try {
@@ -258,7 +262,7 @@ function HomeMapContent({ navigation }) {
       } catch { /* ignore — tour is non-critical */ }
     })();
     return () => { cancelled = true; };
-  }, [isMapReady, isInsideDeliveryZone, startGuide, startTour]);
+  }, [isFocused, isMapReady, isInsideDeliveryZone, startGuide, startTour]);
 
   // ── Helper text ────────────────────────────────────────
   let orderHelperText = 'Waiting for high-accuracy location lock...';

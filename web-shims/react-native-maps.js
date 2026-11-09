@@ -117,6 +117,7 @@ const MapView = forwardRef(function MapView(props, ref) {
     initialCamera,
     mapType = 'standard',
     showsUserLocation,
+    showsMyLocationButton,
     showsScale,
     scrollEnabled = true,
     zoomEnabled = true,
@@ -127,6 +128,7 @@ const MapView = forwardRef(function MapView(props, ref) {
 
   const hostRef = useRef(null);
   const mapRef = useRef(null);
+  const lastUserPosRef = useRef(null);
   const [map, setMap] = useState(null);
   // Camera mode = the FPV drone view: the map is rotated to the drone's
   // heading and tilted with CSS, since Leaflet itself can't rotate.
@@ -169,7 +171,8 @@ const MapView = forwardRef(function MapView(props, ref) {
       m.fitBounds(regionBounds(r), { animate: false });
     }
 
-    if (showsScale) L.control.scale({ position: 'bottomleft' }).addTo(m);
+    // Top-left: app screens put their own cards along the bottom edge.
+    if (showsScale) L.control.scale({ position: 'topleft' }).addTo(m);
 
     m.on('click', (e) => cbRef.current.onPress?.(fakePressEvent(e.latlng)));
     m.on('moveend', () => {
@@ -240,6 +243,7 @@ const MapView = forwardRef(function MapView(props, ref) {
     const watchId = navigator.geolocation.watchPosition(
       (pos) => {
         const ll = L.latLng(pos.coords.latitude, pos.coords.longitude);
+        lastUserPosRef.current = ll;
         const acc = pos.coords.accuracy || 0;
         if (!dot) {
           halo = L.circle(ll, {
@@ -265,23 +269,68 @@ const MapView = forwardRef(function MapView(props, ref) {
     };
   }, [map, showsUserLocation]);
 
+  // "Center on me" button (native showsMyLocationButton).
+  useEffect(() => {
+    if (!map || !showsMyLocationButton || typeof navigator === 'undefined' || !navigator.geolocation) {
+      return undefined;
+    }
+    const flyToMe = (ll) => map.flyTo(ll, Math.max(map.getZoom(), 15), { duration: 0.6 });
+    const Locate = L.Control.extend({
+      options: { position: 'topleft' },
+      onAdd() {
+        const bar = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+        const a = L.DomUtil.create('a', '', bar);
+        a.href = '#';
+        a.title = 'Center on my location';
+        a.setAttribute('role', 'button');
+        a.setAttribute('aria-label', 'Center on my location');
+        a.style.display = 'flex';
+        a.style.alignItems = 'center';
+        a.style.justifyContent = 'center';
+        a.innerHTML =
+          '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#0A84FF" stroke-width="2.4" stroke-linecap="round">' +
+          '<circle cx="12" cy="12" r="5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>';
+        L.DomEvent.disableClickPropagation(bar);
+        L.DomEvent.on(a, 'click', (e) => {
+          L.DomEvent.stop(e);
+          if (lastUserPosRef.current) {
+            flyToMe(lastUserPosRef.current);
+            return;
+          }
+          navigator.geolocation.getCurrentPosition(
+            (pos) => flyToMe(L.latLng(pos.coords.latitude, pos.coords.longitude)),
+            () => {},
+            { enableHighAccuracy: true, timeout: 10000 },
+          );
+        });
+        return bar;
+      },
+    });
+    const control = new Locate().addTo(map);
+    return () => { control.remove(); };
+  }, [map, showsMyLocationButton]);
+
   useImperativeHandle(ref, () => ({
     animateToRegion(r, duration = 500) {
       const m = mapRef.current;
       if (!m || !r) return;
-      m.flyToBounds(regionBounds(r), { duration: Math.max(duration, 1) / 1000 });
+      m.flyToBounds(regionBounds(r), { duration: Math.max(duration, 1) / 1000, maxZoom: 18 });
     },
     fitToCoordinates(coords = [], options = {}) {
       const m = mapRef.current;
       if (!m || !coords.length) return;
       const pad = options.edgePadding || {};
       const animate = options.animated !== false;
-      if (coords.length === 1) {
-        m.setView(toLatLng(coords[0]), Math.max(m.getZoom(), 15), { animate });
+      const bounds = L.latLngBounds(coords.map(toLatLng));
+      // One point, or several on the same spot (hive placed exactly where
+      // the user stands): a zero-size box would zoom to the max and blur.
+      if (coords.length === 1 || bounds.getNorthEast().distanceTo(bounds.getSouthWest()) < 30) {
+        m.setView(bounds.getCenter(), 17, { animate });
         return;
       }
-      m.fitBounds(L.latLngBounds(coords.map(toLatLng)), {
+      m.fitBounds(bounds, {
         animate,
+        maxZoom: 18,
         paddingTopLeft: [pad.left || 0, pad.top || 0],
         paddingBottomRight: [pad.right || 0, pad.bottom || 0],
       });

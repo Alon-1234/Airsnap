@@ -114,7 +114,7 @@ async function loadPersistedHives() {
       });
       count += 1;
     }
-    console.log(`[hives] restored ${count} hive(s) from Firestore`);
+    console.log(`[hives] restored ${count} hive(s) from the database`);
     return count;
   } catch (err) {
     console.warn('[hives] restore failed (continuing in-memory):', err.message);

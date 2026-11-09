@@ -23,7 +23,8 @@ if [ ! -f .env ]; then
 fi
 
 echo "Building and starting AirSnap... the first time takes 5-10 minutes."
-docker compose up --build -d
+# A fresh Docker install sometimes fails the very first build — retry once.
+docker compose up --build -d || { echo "First try failed - trying once more..."; docker compose up --build -d; }
 
 printf "Waiting for the app"
 i=0

@@ -32,7 +32,15 @@ echo.
 echo   Building and starting AirSnap... the first time takes 5-10 minutes.
 echo.
 docker compose up --build -d
+if not errorlevel 1 goto :wait
+rem A fresh Docker install sometimes fails the very first build - retry once.
+echo.
+echo   First try failed - trying once more...
+echo.
+docker compose up --build -d
 if errorlevel 1 goto :failed
+
+:wait
 
 echo.
 echo   Waiting for the app to start...

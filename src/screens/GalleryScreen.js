@@ -42,7 +42,7 @@ import { Video, ResizeMode } from 'expo-av';
 
 import { ScreenWrapper } from '../components/common';
 import MediaViewerModal from '../components/MediaViewerModal';
-import { saveMediaToDevice } from '../utils/mediaDownload';
+import { saveMediaToDevice, SAVE_DESTINATION } from '../utils/mediaDownload';
 import { useTheme } from '../context';
 import { Typography, Spacing } from '../theme';
 
@@ -181,8 +181,8 @@ export default function GalleryScreen() {
     Alert.alert(
       failed ? 'Partially saved' : 'Saved',
       failed
-        ? `${toSave.length - failed} of ${toSave.length} items saved to Photos (${failed} failed).`
-        : `All ${toSave.length} items saved to your Photos.`,
+        ? `${toSave.length - failed} of ${toSave.length} items saved to ${SAVE_DESTINATION} (${failed} failed).`
+        : `All ${toSave.length} items saved to your ${SAVE_DESTINATION}.`,
     );
   };
 

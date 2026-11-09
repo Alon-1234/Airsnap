@@ -10,6 +10,9 @@
  * ============================================================
  */
 
+// Where saved media ends up — used in "Saved" messages.
+export const SAVE_DESTINATION = 'Downloads folder';
+
 function triggerDownload(href, filename) {
   const a = document.createElement('a');
   a.href = href;
