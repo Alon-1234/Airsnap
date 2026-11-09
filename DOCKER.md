@@ -19,7 +19,13 @@ no phone, no setup files.
 ## 3. Start it
 
 - **Windows:** double-click **`Start AirSnap (Docker).bat`**
-- **Mac / Linux:** open a terminal in the folder and run `./start-docker.sh`
+- **Mac / Linux:** open **Terminal**, go into the folder and run the start script:
+  ```sh
+  cd ~/Downloads/Airsnap-main   # wherever you unzipped / cloned it
+  sh start-docker.sh
+  ```
+  (On a Mac, `git` asks to install Apple's developer tools the first time. Click
+  Install, or just use the ZIP download instead.)
 
 The first time, it asks for **the email you'll sign in with**. On your copy that
 account becomes **admin**, so you can place drone hives and order for free.
@@ -40,14 +46,14 @@ When it's ready, two browser tabs open:
 3. When the browser asks, **allow location**.
 4. **Profile → Manage Hives (admin) → Place at my location** (or tap the map).
    This puts a drone hive next to you.
-5. Go back to **Order**, tap **Order now**, pick a package, then **Place Order — Free (admin)**.
+5. Go back to **Order**, tap **Order Drone**, pick a package, then **Place Order — Free (admin)**.
 6. Watch the drone fly to you, and on the **live viewer** tab too. Tap the drone
    for the drone camera view. Your photos and videos end up in the **Gallery**.
 
 ## 5. Stop it
 
 - **Windows:** double-click **`Stop AirSnap (Docker).bat`**
-- **Mac / Linux:** `docker compose down`
+- **Mac / Linux:** `docker compose down` (in Terminal, inside the AirSnap folder)
 
 Your data (accounts' credits, hives, promo codes) is kept for next time.
 To wipe everything and start fresh: `docker compose down -v`.
